@@ -30,6 +30,9 @@ type Querier interface {
 	GetParticipantByToken(ctx context.Context, inviteToken *string) (TripParticipant, error)
 	GetParticipantByTripUser(ctx context.Context, arg GetParticipantByTripUserParams) (TripParticipant, error)
 	GetPhoto(ctx context.Context, id uuid.UUID) (Photo, error)
+	// Returns the trip only if it is public — callers get NoRows (→ 404) otherwise,
+	// never revealing whether a private trip exists.
+	GetPublicTrip(ctx context.Context, id uuid.UUID) (GetPublicTripRow, error)
 	GetSettlement(ctx context.Context, id uuid.UUID) (Settlement, error)
 	GetTransport(ctx context.Context, id uuid.UUID) (Transportation, error)
 	GetTrip(ctx context.Context, id uuid.UUID) (Trip, error)
@@ -54,12 +57,20 @@ type Querier interface {
 	ListExternalPayers(ctx context.Context, tripID uuid.UUID) ([]ExternalPayer, error)
 	ListOwnedTrips(ctx context.Context, ownerID uuid.UUID) ([]Trip, error)
 	ListParticipants(ctx context.Context, tripID uuid.UUID) ([]ListParticipantsRow, error)
+	// Owner is prepended in Go; this returns accepted collaborators only (no
+	// viewers, no external payers, no emails or ids).
+	ListPublicPeople(ctx context.Context, tripID uuid.UUID) ([]ListPublicPeopleRow, error)
+	// Public discovery. q matches title/description/start_location/destination names
+	// (case-insensitive); trip_type filters exactly. Empty string = no filter.
+	ListPublicTrips(ctx context.Context, arg ListPublicTripsParams) ([]ListPublicTripsRow, error)
 	ListSettlements(ctx context.Context, tripID uuid.UUID) ([]Settlement, error)
 	ListSharedTrips(ctx context.Context, userID *uuid.UUID) ([]ListSharedTripsRow, error)
 	ListSharesForExpense(ctx context.Context, expenseID uuid.UUID) ([]ExpenseShare, error)
 	ListTransport(ctx context.Context, tripID uuid.UUID) ([]Transportation, error)
 	ListTripPhotos(ctx context.Context, tripID uuid.UUID) ([]Photo, error)
 	ListTripShares(ctx context.Context, tripID uuid.UUID) ([]ListTripSharesRow, error)
+	PublicCategoryBreakdown(ctx context.Context, tripID uuid.UUID) ([]PublicCategoryBreakdownRow, error)
+	PublicTotalExpenses(ctx context.Context, tripID uuid.UUID) (int64, error)
 	SetParticipantStatus(ctx context.Context, arg SetParticipantStatusParams) error
 	SetTripPublic(ctx context.Context, arg SetTripPublicParams) error
 	TotalExpenses(ctx context.Context, tripID uuid.UUID) (int64, error)

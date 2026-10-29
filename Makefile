@@ -9,14 +9,13 @@ generate:
 	go tool sqlc generate
 
 migrate:
-	@psql "$(POSTGRESQL_URL)" -c "CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\";"
-	POSTGRESQL_URL="$(POSTGRESQL_URL)" tern migrate --migrations migrations/
+	POSTGRESQL_URL="$(POSTGRESQL_URL)" go tool tern migrate --migrations migrations/
 
 rollback:
-	POSTGRESQL_URL="$(POSTGRESQL_URL)" tern migrate --migrations migrations/ --destination $(dest)
+	POSTGRESQL_URL="$(POSTGRESQL_URL)" go tool tern migrate --migrations migrations/ --destination $(dest)
 
 new:
-	TERN_MIGRATIONS="migrations" tern new $(name)
+	TERN_MIGRATIONS="migrations" go tool tern new $(name)
 
 run:
 	go run .

@@ -97,11 +97,13 @@ func (s *TripService) Update(ctx context.Context, tripID, userID uuid.UUID, in t
 	}))
 }
 
-func (s *TripService) SetPublic(ctx context.Context, tripID, userID uuid.UUID, isPublic bool) error {
+func (s *TripService) SetPublic(ctx context.Context, tripID, userID uuid.UUID, isPublic, showCostsPublic bool) error {
 	if _, err := requireOwner(ctx, s.q, tripID, userID); err != nil {
 		return err
 	}
-	return apperror.FromDBOrNil(s.q.SetTripPublic(ctx, models.SetTripPublicParams{IsPublic: isPublic, ID: tripID}))
+	return apperror.FromDBOrNil(s.q.SetTripPublic(ctx, models.SetTripPublicParams{
+		IsPublic: isPublic, ShowCostsPublic: showCostsPublic, ID: tripID,
+	}))
 }
 
 func (s *TripService) Archive(ctx context.Context, tripID, userID uuid.UUID) error {

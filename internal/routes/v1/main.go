@@ -19,16 +19,20 @@ func Load(router *echo.Group) {
 	eh := handlers.NewExpenseHandler()
 	sh := handlers.NewSettlementHandler()
 	smh := handlers.NewSummaryHandler()
+	pub := handlers.NewPublicHandler()
 
-	// Public
+	// Public — no auth (a bearer token, if sent, is ignored)
 	router.POST("/auth/register", ah.Register)
 	router.POST("/auth/login", ah.Login)
+	router.GET("/public/trips", pub.List)
+	router.GET("/public/trips/:id", pub.Get)
 
 	// Authenticated
 	p := router.Group("", auth.Middleware)
 	p.GET("/me", ah.Me)
 	p.PUT("/me", ah.UpdateProfile)
 	p.POST("/invites/accept", ph.Accept)
+	p.POST("/public/trips/:id/copy", pub.Copy) // copy-as-template needs the caller
 
 	t := p.Group("/trips")
 	t.POST("", th.Create)

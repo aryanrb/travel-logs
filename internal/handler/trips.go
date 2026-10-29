@@ -88,7 +88,7 @@ func (h *TripHandler) SetPublic(c echo.Context) error {
 	if err := bind(c, &in); err != nil {
 		return err
 	}
-	if err := h.svc.SetPublic(c.Request().Context(), id, auth.UserID(c), in.IsPublic); err != nil {
+	if err := h.svc.SetPublic(c.Request().Context(), id, auth.UserID(c), in.IsPublic, in.ShowCostsPublic); err != nil {
 		return err
 	}
 	return responder.JSONResponse(c, "updated", http.StatusOK)

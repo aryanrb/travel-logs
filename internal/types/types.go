@@ -33,6 +33,15 @@ func (d Date) MarshalJSON() ([]byte, error) {
 
 func (d Date) Time() time.Time { return time.Time(d) }
 
+// DateFromPtr converts an optional time.Time into an optional output Date.
+func DateFromPtr(t *time.Time) *Date {
+	if t == nil {
+		return nil
+	}
+	d := Date(*t)
+	return &d
+}
+
 // DatePtr converts an optional request Date into an optional time.Time.
 func DatePtr(d *Date) *time.Time {
 	if d == nil {
@@ -92,7 +101,8 @@ type DestinationInput struct {
 }
 
 type SetPublicInput struct {
-	IsPublic bool `json:"is_public"`
+	IsPublic        bool `json:"is_public"`
+	ShowCostsPublic bool `json:"show_costs_public"`
 }
 
 type TripsListResponse struct {
@@ -176,16 +186,17 @@ type ShareInput struct {
 }
 
 type ExpenseInput struct {
-	Title       string       `json:"title"`
-	Amount      int64        `json:"amount"` // minor units, > 0
-	Currency    *string      `json:"currency"`
-	Category    *string      `json:"category"`
-	Date        Date         `json:"date"`
-	PaidBy      PartyRef     `json:"paid_by"`
-	SplitMethod string       `json:"split_method"` // "equal" | "custom"
-	SharedAmong []ShareInput `json:"shared_among"`
-	Notes       *string      `json:"notes"`
-	ReceiptURL  *string      `json:"receipt_url"`
+	Title          string       `json:"title"`
+	Amount         int64        `json:"amount"` // minor units, > 0
+	Currency       *string      `json:"currency"`
+	Category       *string      `json:"category"`
+	Date           Date         `json:"date"`
+	PaidBy         PartyRef     `json:"paid_by"`
+	SplitMethod    string       `json:"split_method"` // "equal" | "custom"
+	SharedAmong    []ShareInput `json:"shared_among"`
+	Notes          *string      `json:"notes"`
+	ReceiptURL     *string      `json:"receipt_url"`
+	HideFromPublic bool         `json:"hide_from_public"`
 }
 
 type Party struct {
@@ -244,4 +255,95 @@ type SummaryResponse struct {
 	CategoryBreakdown []models.CategoryBreakdownRow  `json:"category_breakdown"`
 	Transportation    []models.TransportBreakdownRow `json:"transportation"`
 	Balances          []BalanceEntry                 `json:"balances"`
+}
+
+// ─── Public (unauthenticated) ────────────────────────────────────────────────
+
+// PublicTripSafe is the whitelist of trip fields safe to expose publicly.
+// Nothing financial or personal beyond these appears in public responses.
+type PublicTripSafe struct {
+	ID            uuid.UUID `json:"id"`
+	Title         string    `json:"title"`
+	Description   *string   `json:"description"`
+	CoverImage    *string   `json:"cover_image"`
+	StartDate     *Date     `json:"start_date"`
+	EndDate       *Date     `json:"end_date"`
+	StartLocation *string   `json:"start_location"`
+	TripType      *string   `json:"trip_type"`
+	Currency      string    `json:"currency"`
+	IsPublic      bool      `json:"is_public"`
+}
+
+type PublicTripListItem struct {
+	Trip         PublicTripSafe `json:"trip"`
+	Destinations []string       `json:"destinations"`
+	OwnerName    string         `json:"owner_name"`
+}
+
+type PublicTripListResponse struct {
+	Trips []PublicTripListItem `json:"trips"`
+}
+
+type PublicPerson struct {
+	Name string `json:"name"`
+	Role string `json:"role"`
+}
+
+type PublicDestination struct {
+	ID          uuid.UUID `json:"id"`
+	Name        string    `json:"name"`
+	ArrivalDate *Date     `json:"arrival_date"`
+	SortOrder   int32     `json:"sort_order"`
+}
+
+type PublicEntry struct {
+	ID          uuid.UUID `json:"id"`
+	Title       string    `json:"title"`
+	Description *string   `json:"description"`
+	EntryDate   Date      `json:"entry_date"`
+	EntryTime   *string   `json:"entry_time"`
+	Location    *string   `json:"location"`
+}
+
+type PublicTransport struct {
+	ID          uuid.UUID  `json:"id"`
+	Type        string     `json:"type"`
+	StartPoint  *string    `json:"start_point"`
+	Destination *string    `json:"destination"`
+	DepartAt    *time.Time `json:"depart_at"`
+	DistanceKm  *float64   `json:"distance_km"`
+	DurationMin *int32     `json:"duration_min"`
+	Notes       *string    `json:"notes"`
+	EntryID     *uuid.UUID `json:"entry_id"`
+	CostAmount  *int64     `json:"cost_amount,omitempty"` // only when show_costs_public
+}
+
+type PublicPhoto struct {
+	ID        uuid.UUID  `json:"id"`
+	URL       string     `json:"url"`
+	Caption   *string    `json:"caption"`
+	TakenDate *Date      `json:"taken_date"`
+	EntryID   *uuid.UUID `json:"entry_id"`
+}
+
+type PublicBudget struct {
+	Currency   string                              `json:"currency"`
+	Total      int64                               `json:"total"`
+	Travellers int                                 `json:"travellers"`
+	ByCategory []models.PublicCategoryBreakdownRow `json:"by_category"`
+}
+
+type PublicTripDetail struct {
+	Trip           PublicTripSafe      `json:"trip"`
+	Destinations   []PublicDestination `json:"destinations"`
+	People         []PublicPerson      `json:"people"`
+	Entries        []PublicEntry       `json:"entries"`
+	Transportation []PublicTransport   `json:"transportation"`
+	Photos         []PublicPhoto       `json:"photos"`
+	Budget         *PublicBudget       `json:"budget"`
+}
+
+type CopyTripInput struct {
+	Title     string `json:"title"`
+	StartDate Date   `json:"start_date"`
 }

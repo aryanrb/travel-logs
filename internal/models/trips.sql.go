@@ -45,7 +45,7 @@ func (q *Queries) DeleteTrip(ctx context.Context, id uuid.UUID) error {
 }
 
 const getTrip = `-- name: GetTrip :one
-SELECT id, owner_id, title, cover_image, description, start_date, end_date, start_location, trip_type, currency, is_public, archived_at, created_at, updated_at FROM trips WHERE id = $1
+SELECT id, owner_id, title, cover_image, description, start_date, end_date, start_location, trip_type, currency, is_public, archived_at, created_at, updated_at, show_costs_public FROM trips WHERE id = $1
 `
 
 func (q *Queries) GetTrip(ctx context.Context, id uuid.UUID) (Trip, error) {
@@ -66,6 +66,7 @@ func (q *Queries) GetTrip(ctx context.Context, id uuid.UUID) (Trip, error) {
 		&i.ArchivedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ShowCostsPublic,
 	)
 	return i, err
 }
@@ -109,7 +110,7 @@ INSERT INTO trips (
     $1, $2, $3, $4, $5, $6,
     $7, $8, $9
 )
-RETURNING id, owner_id, title, cover_image, description, start_date, end_date, start_location, trip_type, currency, is_public, archived_at, created_at, updated_at
+RETURNING id, owner_id, title, cover_image, description, start_date, end_date, start_location, trip_type, currency, is_public, archived_at, created_at, updated_at, show_costs_public
 `
 
 type InsertTripParams struct {
@@ -152,6 +153,7 @@ func (q *Queries) InsertTrip(ctx context.Context, arg InsertTripParams) (Trip, e
 		&i.ArchivedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ShowCostsPublic,
 	)
 	return i, err
 }
@@ -187,7 +189,7 @@ func (q *Queries) ListDestinations(ctx context.Context, tripID uuid.UUID) ([]Tri
 }
 
 const listOwnedTrips = `-- name: ListOwnedTrips :many
-SELECT id, owner_id, title, cover_image, description, start_date, end_date, start_location, trip_type, currency, is_public, archived_at, created_at, updated_at FROM trips
+SELECT id, owner_id, title, cover_image, description, start_date, end_date, start_location, trip_type, currency, is_public, archived_at, created_at, updated_at, show_costs_public FROM trips
 WHERE owner_id = $1
 ORDER BY created_at DESC
 `
@@ -216,6 +218,7 @@ func (q *Queries) ListOwnedTrips(ctx context.Context, ownerID uuid.UUID) ([]Trip
 			&i.ArchivedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.ShowCostsPublic,
 		); err != nil {
 			return nil, err
 		}
@@ -228,7 +231,7 @@ func (q *Queries) ListOwnedTrips(ctx context.Context, ownerID uuid.UUID) ([]Trip
 }
 
 const listSharedTrips = `-- name: ListSharedTrips :many
-SELECT trips.id, trips.owner_id, trips.title, trips.cover_image, trips.description, trips.start_date, trips.end_date, trips.start_location, trips.trip_type, trips.currency, trips.is_public, trips.archived_at, trips.created_at, trips.updated_at, p.role
+SELECT trips.id, trips.owner_id, trips.title, trips.cover_image, trips.description, trips.start_date, trips.end_date, trips.start_location, trips.trip_type, trips.currency, trips.is_public, trips.archived_at, trips.created_at, trips.updated_at, trips.show_costs_public, p.role
 FROM trips
 JOIN trip_participants p ON p.trip_id = trips.id
 WHERE p.user_id = $1 AND p.status = 'accepted'
@@ -264,6 +267,7 @@ func (q *Queries) ListSharedTrips(ctx context.Context, userID *uuid.UUID) ([]Lis
 			&i.Trip.ArchivedAt,
 			&i.Trip.CreatedAt,
 			&i.Trip.UpdatedAt,
+			&i.Trip.ShowCostsPublic,
 			&i.Role,
 		); err != nil {
 			return nil, err
@@ -277,16 +281,17 @@ func (q *Queries) ListSharedTrips(ctx context.Context, userID *uuid.UUID) ([]Lis
 }
 
 const setTripPublic = `-- name: SetTripPublic :exec
-UPDATE trips SET is_public = $1, updated_at = now() WHERE id = $2
+UPDATE trips SET is_public = $1, show_costs_public = $2, updated_at = now() WHERE id = $3
 `
 
 type SetTripPublicParams struct {
-	IsPublic bool      `db:"is_public" json:"is_public"`
-	ID       uuid.UUID `db:"id" json:"id"`
+	IsPublic        bool      `db:"is_public" json:"is_public"`
+	ShowCostsPublic bool      `db:"show_costs_public" json:"show_costs_public"`
+	ID              uuid.UUID `db:"id" json:"id"`
 }
 
 func (q *Queries) SetTripPublic(ctx context.Context, arg SetTripPublicParams) error {
-	_, err := q.db.Exec(ctx, setTripPublic, arg.IsPublic, arg.ID)
+	_, err := q.db.Exec(ctx, setTripPublic, arg.IsPublic, arg.ShowCostsPublic, arg.ID)
 	return err
 }
 

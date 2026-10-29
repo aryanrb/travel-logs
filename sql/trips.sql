@@ -37,7 +37,7 @@ UPDATE trips SET
 WHERE id = @id;
 
 -- name: SetTripPublic :exec
-UPDATE trips SET is_public = @is_public, updated_at = now() WHERE id = @id;
+UPDATE trips SET is_public = @is_public, show_costs_public = @show_costs_public, updated_at = now() WHERE id = @id;
 
 -- name: ArchiveTrip :exec
 UPDATE trips SET archived_at = now(), updated_at = now() WHERE id = @id;

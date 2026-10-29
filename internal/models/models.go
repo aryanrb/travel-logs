@@ -26,6 +26,7 @@ type Expense struct {
 	ReceiptUrl       *string    `db:"receipt_url" json:"receipt_url"`
 	CreatedAt        time.Time  `db:"created_at" json:"created_at"`
 	UpdatedAt        time.Time  `db:"updated_at" json:"updated_at"`
+	HideFromPublic   bool       `db:"hide_from_public" json:"hide_from_public"`
 }
 
 type ExpenseShare struct {
@@ -102,20 +103,21 @@ type Transportation struct {
 }
 
 type Trip struct {
-	ID            uuid.UUID  `db:"id" json:"id"`
-	OwnerID       uuid.UUID  `db:"owner_id" json:"owner_id"`
-	Title         string     `db:"title" json:"title"`
-	CoverImage    *string    `db:"cover_image" json:"cover_image"`
-	Description   *string    `db:"description" json:"description"`
-	StartDate     *time.Time `db:"start_date" json:"start_date"`
-	EndDate       *time.Time `db:"end_date" json:"end_date"`
-	StartLocation *string    `db:"start_location" json:"start_location"`
-	TripType      *string    `db:"trip_type" json:"trip_type"`
-	Currency      string     `db:"currency" json:"currency"`
-	IsPublic      bool       `db:"is_public" json:"is_public"`
-	ArchivedAt    *time.Time `db:"archived_at" json:"archived_at"`
-	CreatedAt     time.Time  `db:"created_at" json:"created_at"`
-	UpdatedAt     time.Time  `db:"updated_at" json:"updated_at"`
+	ID              uuid.UUID  `db:"id" json:"id"`
+	OwnerID         uuid.UUID  `db:"owner_id" json:"owner_id"`
+	Title           string     `db:"title" json:"title"`
+	CoverImage      *string    `db:"cover_image" json:"cover_image"`
+	Description     *string    `db:"description" json:"description"`
+	StartDate       *time.Time `db:"start_date" json:"start_date"`
+	EndDate         *time.Time `db:"end_date" json:"end_date"`
+	StartLocation   *string    `db:"start_location" json:"start_location"`
+	TripType        *string    `db:"trip_type" json:"trip_type"`
+	Currency        string     `db:"currency" json:"currency"`
+	IsPublic        bool       `db:"is_public" json:"is_public"`
+	ArchivedAt      *time.Time `db:"archived_at" json:"archived_at"`
+	CreatedAt       time.Time  `db:"created_at" json:"created_at"`
+	UpdatedAt       time.Time  `db:"updated_at" json:"updated_at"`
+	ShowCostsPublic bool       `db:"show_costs_public" json:"show_costs_public"`
 }
 
 type TripDestination struct {

@@ -238,6 +238,7 @@ func (s *ExpenseService) Create(ctx context.Context, tripID, userID uuid.UUID, i
 		SplitMethod:      in.SplitMethod,
 		Notes:            in.Notes,
 		ReceiptUrl:       in.ReceiptURL,
+		HideFromPublic:   in.HideFromPublic,
 	})
 	if err != nil {
 		return nil, apperror.FromDB(err)
@@ -336,6 +337,7 @@ func (s *ExpenseService) Update(ctx context.Context, tripID, expenseID, userID u
 		SplitMethod:      in.SplitMethod,
 		Notes:            in.Notes,
 		ReceiptUrl:       in.ReceiptURL,
+		HideFromPublic:   in.HideFromPublic,
 		ID:               expenseID,
 	}); err != nil {
 		return nil, apperror.FromDB(err)

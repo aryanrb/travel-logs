@@ -6,9 +6,10 @@ import (
 )
 
 type envConfig struct {
-	Port          string
-	PostgresqlUrl string
-	JWTSecret     string
+	Port             string
+	PostgresqlUrl    string
+	JWTSecret        string
+	NominatimContact string // contact email for the geocoder User-Agent; empty disables geocoding
 }
 
 var Env envConfig
@@ -33,8 +34,9 @@ func getOptEnv(name, def string) string {
 // InitConfig loads config from environment variables.
 func InitConfig() {
 	Env = envConfig{
-		Port:          getOptEnv("PORT", "8080"),
-		PostgresqlUrl: getEnv("POSTGRESQL_URL"),
-		JWTSecret:     getEnv("JWT_SECRET"),
+		Port:             getOptEnv("PORT", "8080"),
+		PostgresqlUrl:    getEnv("POSTGRESQL_URL"),
+		JWTSecret:        getEnv("JWT_SECRET"),
+		NominatimContact: getOptEnv("NOMINATIM_CONTACT", ""),
 	}
 }

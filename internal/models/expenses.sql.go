@@ -63,7 +63,7 @@ func (q *Queries) DeleteSharesForExpense(ctx context.Context, expenseID uuid.UUI
 }
 
 const getExpense = `-- name: GetExpense :one
-SELECT id, trip_id, title, amount, currency, category, expense_date, paid_by_user_id, paid_by_external_id, recorded_by, split_method, notes, receipt_url, created_at, updated_at, hide_from_public FROM expenses WHERE id = $1
+SELECT id, trip_id, title, amount, currency, category, expense_date, paid_by_user_id, paid_by_external_id, recorded_by, split_method, notes, receipt_url, created_at, updated_at, hide_from_public, entry_id, original_currency, original_amount, exchange_rate FROM expenses WHERE id = $1
 `
 
 func (q *Queries) GetExpense(ctx context.Context, id uuid.UUID) (Expense, error) {
@@ -86,6 +86,10 @@ func (q *Queries) GetExpense(ctx context.Context, id uuid.UUID) (Expense, error)
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.HideFromPublic,
+		&i.EntryID,
+		&i.OriginalCurrency,
+		&i.OriginalAmount,
+		&i.ExchangeRate,
 	)
 	return i, err
 }
@@ -93,12 +97,14 @@ func (q *Queries) GetExpense(ctx context.Context, id uuid.UUID) (Expense, error)
 const insertExpense = `-- name: InsertExpense :one
 INSERT INTO expenses (
     trip_id, title, amount, currency, category, expense_date,
-    paid_by_user_id, paid_by_external_id, recorded_by, split_method, notes, receipt_url, hide_from_public
+    paid_by_user_id, paid_by_external_id, recorded_by, split_method, notes, receipt_url, hide_from_public, entry_id,
+    original_currency, original_amount, exchange_rate
 ) VALUES (
     $1, $2, $3, $4, $5, $6,
-    $7, $8, $9, $10, $11, $12, $13
+    $7, $8, $9, $10, $11, $12, $13, $14,
+    $15, $16, $17
 )
-RETURNING id, trip_id, title, amount, currency, category, expense_date, paid_by_user_id, paid_by_external_id, recorded_by, split_method, notes, receipt_url, created_at, updated_at, hide_from_public
+RETURNING id, trip_id, title, amount, currency, category, expense_date, paid_by_user_id, paid_by_external_id, recorded_by, split_method, notes, receipt_url, created_at, updated_at, hide_from_public, entry_id, original_currency, original_amount, exchange_rate
 `
 
 type InsertExpenseParams struct {
@@ -115,6 +121,10 @@ type InsertExpenseParams struct {
 	Notes            *string    `db:"notes" json:"notes"`
 	ReceiptUrl       *string    `db:"receipt_url" json:"receipt_url"`
 	HideFromPublic   bool       `db:"hide_from_public" json:"hide_from_public"`
+	EntryID          *uuid.UUID `db:"entry_id" json:"entry_id"`
+	OriginalCurrency *string    `db:"original_currency" json:"original_currency"`
+	OriginalAmount   *int64     `db:"original_amount" json:"original_amount"`
+	ExchangeRate     *float64   `db:"exchange_rate" json:"exchange_rate"`
 }
 
 func (q *Queries) InsertExpense(ctx context.Context, arg InsertExpenseParams) (Expense, error) {
@@ -132,6 +142,10 @@ func (q *Queries) InsertExpense(ctx context.Context, arg InsertExpenseParams) (E
 		arg.Notes,
 		arg.ReceiptUrl,
 		arg.HideFromPublic,
+		arg.EntryID,
+		arg.OriginalCurrency,
+		arg.OriginalAmount,
+		arg.ExchangeRate,
 	)
 	var i Expense
 	err := row.Scan(
@@ -151,6 +165,10 @@ func (q *Queries) InsertExpense(ctx context.Context, arg InsertExpenseParams) (E
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.HideFromPublic,
+		&i.EntryID,
+		&i.OriginalCurrency,
+		&i.OriginalAmount,
+		&i.ExchangeRate,
 	)
 	return i, err
 }
@@ -179,7 +197,7 @@ func (q *Queries) InsertShare(ctx context.Context, arg InsertShareParams) error 
 }
 
 const listExpenses = `-- name: ListExpenses :many
-SELECT id, trip_id, title, amount, currency, category, expense_date, paid_by_user_id, paid_by_external_id, recorded_by, split_method, notes, receipt_url, created_at, updated_at, hide_from_public FROM expenses WHERE trip_id = $1 ORDER BY expense_date DESC, created_at DESC
+SELECT id, trip_id, title, amount, currency, category, expense_date, paid_by_user_id, paid_by_external_id, recorded_by, split_method, notes, receipt_url, created_at, updated_at, hide_from_public, entry_id, original_currency, original_amount, exchange_rate FROM expenses WHERE trip_id = $1 ORDER BY expense_date DESC, created_at DESC
 `
 
 func (q *Queries) ListExpenses(ctx context.Context, tripID uuid.UUID) ([]Expense, error) {
@@ -208,6 +226,10 @@ func (q *Queries) ListExpenses(ctx context.Context, tripID uuid.UUID) ([]Expense
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.HideFromPublic,
+			&i.EntryID,
+			&i.OriginalCurrency,
+			&i.OriginalAmount,
+			&i.ExchangeRate,
 		); err != nil {
 			return nil, err
 		}
@@ -306,8 +328,12 @@ UPDATE expenses SET
     notes = $9,
     receipt_url = $10,
     hide_from_public = $11,
+    entry_id = $12,
+    original_currency = $13,
+    original_amount = $14,
+    exchange_rate = $15,
     updated_at = now()
-WHERE id = $12
+WHERE id = $16
 `
 
 type UpdateExpenseParams struct {
@@ -322,6 +348,10 @@ type UpdateExpenseParams struct {
 	Notes            *string    `db:"notes" json:"notes"`
 	ReceiptUrl       *string    `db:"receipt_url" json:"receipt_url"`
 	HideFromPublic   bool       `db:"hide_from_public" json:"hide_from_public"`
+	EntryID          *uuid.UUID `db:"entry_id" json:"entry_id"`
+	OriginalCurrency *string    `db:"original_currency" json:"original_currency"`
+	OriginalAmount   *int64     `db:"original_amount" json:"original_amount"`
+	ExchangeRate     *float64   `db:"exchange_rate" json:"exchange_rate"`
 	ID               uuid.UUID  `db:"id" json:"id"`
 }
 
@@ -338,6 +368,10 @@ func (q *Queries) UpdateExpense(ctx context.Context, arg UpdateExpenseParams) er
 		arg.Notes,
 		arg.ReceiptUrl,
 		arg.HideFromPublic,
+		arg.EntryID,
+		arg.OriginalCurrency,
+		arg.OriginalAmount,
+		arg.ExchangeRate,
 		arg.ID,
 	)
 	return err

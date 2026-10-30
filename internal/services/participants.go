@@ -28,6 +28,20 @@ func NewParticipantService() *ParticipantService {
 
 func validRole(r string) bool { return r == RoleCollaborator || r == RoleViewer }
 
+// participantTitle names a member for the activity feed: their user name, else
+// the pending invite email.
+func participantTitle(ctx context.Context, q *models.Queries, p models.TripParticipant) string {
+	if p.UserID != nil {
+		if u, err := q.GetUserByID(ctx, *p.UserID); err == nil {
+			return u.Name
+		}
+	}
+	if p.InvitedEmail != nil {
+		return *p.InvitedEmail
+	}
+	return "member"
+}
+
 // Invite adds a pending collaborator/viewer, by existing user or by email.
 // Only the owner may invite (req 3.5). Access is granted only once accepted.
 func (s *ParticipantService) Invite(ctx context.Context, tripID, userID uuid.UUID, in types.InviteInput) (*models.TripParticipant, error) {
@@ -60,11 +74,20 @@ func (s *ParticipantService) Invite(ctx context.Context, tripID, userID uuid.UUI
 		email := strings.ToLower(strings.TrimSpace(*in.InvitedEmail))
 		params.InvitedEmail = &email
 	}
-	p, err := s.q.InsertParticipant(ctx, params)
+	var created models.TripParticipant
+	err = inTx(ctx, s.db, s.q, userID, func(qtx *models.Queries) (*activity, error) {
+		p, err := qtx.InsertParticipant(ctx, params)
+		if err != nil {
+			return nil, apperror.FromDB(err) // dup (trip,user) -> Conflict
+		}
+		created = p
+		return &activity{TripID: tripID, Action: "created", SubjectType: "participant", SubjectID: p.UserID,
+			Data: eventData{Title: participantTitle(ctx, qtx, p)}}, nil
+	})
 	if err != nil {
-		return nil, apperror.FromDB(err) // dup (trip,user) -> Conflict
+		return nil, err
 	}
-	return &p, nil
+	return &created, nil
 }
 
 func (s *ParticipantService) List(ctx context.Context, tripID, userID uuid.UUID) ([]models.ListParticipantsRow, error) {
@@ -99,11 +122,20 @@ func (s *ParticipantService) Accept(ctx context.Context, userID uuid.UUID, token
 		return nil, apperror.Forbidden("this invitation was addressed to a different user")
 	}
 	uid := userID
-	p, err := s.q.AcceptInvite(ctx, models.AcceptInviteParams{UserID: &uid, InviteToken: &tkn})
+	var accepted models.TripParticipant
+	err = inTx(ctx, s.db, s.q, userID, func(qtx *models.Queries) (*activity, error) {
+		p, err := qtx.AcceptInvite(ctx, models.AcceptInviteParams{UserID: &uid, InviteToken: &tkn})
+		if err != nil {
+			return nil, apperror.FromDB(err)
+		}
+		accepted = p
+		return &activity{TripID: p.TripID, Action: "updated", SubjectType: "participant", SubjectID: &userID,
+			Data: eventData{Title: participantTitle(ctx, qtx, p)}}, nil
+	})
 	if err != nil {
-		return nil, apperror.FromDB(err)
+		return nil, err
 	}
-	return &p, nil
+	return &accepted, nil
 }
 
 func (s *ParticipantService) ChangeRole(ctx context.Context, tripID, participantID, userID uuid.UUID, role string) error {
@@ -113,9 +145,34 @@ func (s *ParticipantService) ChangeRole(ctx context.Context, tripID, participant
 	if !validRole(role) {
 		return apperror.UnprocessableEntity("role must be 'collaborator' or 'viewer'")
 	}
-	return apperror.FromDBOrNil(s.q.UpdateParticipantRole(ctx, models.UpdateParticipantRoleParams{
-		Role: role, ID: participantID, TripID: tripID,
-	}))
+	p, err := s.participantInTrip(ctx, participantID, tripID)
+	if err != nil {
+		return err
+	}
+	return inTx(ctx, s.db, s.q, userID, func(qtx *models.Queries) (*activity, error) {
+		if err := qtx.UpdateParticipantRole(ctx, models.UpdateParticipantRoleParams{
+			Role: role, ID: participantID, TripID: tripID,
+		}); err != nil {
+			return nil, apperror.FromDB(err)
+		}
+		return &activity{TripID: tripID, Action: "updated", SubjectType: "participant", SubjectID: p.UserID,
+			Data: eventData{Title: participantTitle(ctx, qtx, p)}}, nil
+	})
+}
+
+// participantInTrip loads a participant and confirms it belongs to the trip.
+func (s *ParticipantService) participantInTrip(ctx context.Context, participantID, tripID uuid.UUID) (models.TripParticipant, error) {
+	p, err := s.q.GetParticipant(ctx, participantID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return p, apperror.NotFound("participant not found")
+		}
+		return p, apperror.FromDB(err)
+	}
+	if p.TripID != tripID {
+		return p, apperror.NotFound("participant not found")
+	}
+	return p, nil
 }
 
 // Remove revokes a participant's access while keeping their historical
@@ -124,7 +181,17 @@ func (s *ParticipantService) Remove(ctx context.Context, tripID, participantID, 
 	if _, err := requireOwner(ctx, s.q, tripID, userID); err != nil {
 		return err
 	}
-	return apperror.FromDBOrNil(s.q.SetParticipantStatus(ctx, models.SetParticipantStatusParams{
-		Status: "revoked", ID: participantID, TripID: tripID,
-	}))
+	p, err := s.participantInTrip(ctx, participantID, tripID)
+	if err != nil {
+		return err
+	}
+	return inTx(ctx, s.db, s.q, userID, func(qtx *models.Queries) (*activity, error) {
+		if err := qtx.SetParticipantStatus(ctx, models.SetParticipantStatusParams{
+			Status: "revoked", ID: participantID, TripID: tripID,
+		}); err != nil {
+			return nil, apperror.FromDB(err)
+		}
+		return &activity{TripID: tripID, Action: "deleted", SubjectType: "participant", SubjectID: p.UserID,
+			Data: eventData{Title: participantTitle(ctx, qtx, p)}}, nil
+	})
 }

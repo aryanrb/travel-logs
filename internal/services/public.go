@@ -44,6 +44,8 @@ func toPublicTripSafe(t models.Trip) types.PublicTripSafe {
 		TripType:      t.TripType,
 		Currency:      t.Currency,
 		IsPublic:      t.IsPublic,
+		StartLat:      t.StartLat,
+		StartLng:      t.StartLng,
 	}
 }
 
@@ -69,14 +71,14 @@ func toPublicTransport(t models.Transportation, showCosts bool) types.PublicTran
 
 // buildPublicBudget returns nil unless costs are public (req: budget is null
 // otherwise). Totals are expected to already exclude hidden expenses.
-func buildPublicBudget(show bool, currency string, total int64, travellers int, cats []models.PublicCategoryBreakdownRow) *types.PublicBudget {
+func buildPublicBudget(show bool, currency string, total int64, travellers int, cats []models.PublicCategoryBreakdownRow, planned *int64) *types.PublicBudget {
 	if !show {
 		return nil
 	}
 	if cats == nil {
 		cats = []models.PublicCategoryBreakdownRow{}
 	}
-	return &types.PublicBudget{Currency: currency, Total: total, Travellers: travellers, ByCategory: cats}
+	return &types.PublicBudget{Currency: currency, Total: total, Travellers: travellers, ByCategory: cats, Planned: planned}
 }
 
 func shiftTime(t time.Time, d time.Duration) time.Time { return t.Add(d) }
@@ -127,7 +129,7 @@ func (s *PublicService) GetTrip(ctx context.Context, tripID uuid.UUID) (*types.P
 	}
 	dests := make([]types.PublicDestination, len(rawDests))
 	for i, d := range rawDests {
-		dests[i] = types.PublicDestination{ID: d.ID, Name: d.Name, ArrivalDate: types.DateFromPtr(d.ArrivalDate), SortOrder: d.SortOrder}
+		dests[i] = types.PublicDestination{ID: d.ID, Name: d.Name, ArrivalDate: types.DateFromPtr(d.ArrivalDate), SortOrder: d.SortOrder, Lat: d.Lat, Lng: d.Lng}
 	}
 
 	// People: owner first, then accepted collaborators. No viewers/externals/ids.
@@ -182,7 +184,7 @@ func (s *PublicService) GetTrip(ctx context.Context, tripID uuid.UUID) (*types.P
 			return nil, apperror.FromDB(err)
 		}
 	}
-	budget := buildPublicBudget(trip.ShowCostsPublic, trip.Currency, total, travellers, cats)
+	budget := buildPublicBudget(trip.ShowCostsPublic, trip.Currency, total, travellers, cats, trip.BudgetAmount)
 
 	return &types.PublicTripDetail{
 		Trip:           toPublicTripSafe(trip),
@@ -304,8 +306,60 @@ func (s *PublicService) Copy(ctx context.Context, sourceID, callerID uuid.UUID, 
 		}
 	}
 
+	if err := recordActivity(ctx, qtx, callerID, activity{
+		TripID: trip.ID, Action: "created", SubjectType: "trip", SubjectID: &trip.ID,
+		Data: eventData{Title: trip.Title},
+	}); err != nil {
+		return nil, err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, apperror.Internal("could not copy trip")
 	}
 	return &trip, nil
+}
+
+// ─── Saved trips ──────────────────────────────────────────────────────────────
+
+// ensurePublic returns 404 unless the trip exists and is public — used so saving
+// a private (or missing) trip never reveals its existence.
+func (s *PublicService) ensurePublic(ctx context.Context, tripID uuid.UUID) error {
+	if _, err := s.q.GetPublicTrip(ctx, tripID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return apperror.NotFound("trip not found")
+		}
+		return apperror.FromDB(err)
+	}
+	return nil
+}
+
+func (s *PublicService) Save(ctx context.Context, tripID, userID uuid.UUID) error {
+	if err := s.ensurePublic(ctx, tripID); err != nil {
+		return err
+	}
+	return apperror.FromDBOrNil(s.q.SaveTrip(ctx, models.SaveTripParams{UserID: userID, TripID: tripID}))
+}
+
+func (s *PublicService) Unsave(ctx context.Context, tripID, userID uuid.UUID) error {
+	if err := s.ensurePublic(ctx, tripID); err != nil {
+		return err
+	}
+	return apperror.FromDBOrNil(s.q.UnsaveTrip(ctx, models.UnsaveTripParams{UserID: userID, TripID: tripID}))
+}
+
+// ListSaved returns the caller's saved trips (public only, newest-saved first) in
+// the same row shape as the discovery list.
+func (s *PublicService) ListSaved(ctx context.Context, userID uuid.UUID) (*types.PublicTripListResponse, error) {
+	rows, err := s.q.ListSavedTrips(ctx, userID)
+	if err != nil {
+		return nil, apperror.FromDB(err)
+	}
+	items := make([]types.PublicTripListItem, len(rows))
+	for i, r := range rows {
+		items[i] = types.PublicTripListItem{
+			Trip:         toPublicTripSafe(r.Trip),
+			Destinations: r.DestinationNames,
+			OwnerName:    r.OwnerName,
+		}
+	}
+	return &types.PublicTripListResponse{Trips: items}, nil
 }

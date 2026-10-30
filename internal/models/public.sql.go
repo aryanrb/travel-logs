@@ -12,7 +12,7 @@ import (
 )
 
 const getPublicTrip = `-- name: GetPublicTrip :one
-SELECT t.id, t.owner_id, t.title, t.cover_image, t.description, t.start_date, t.end_date, t.start_location, t.trip_type, t.currency, t.is_public, t.archived_at, t.created_at, t.updated_at, t.show_costs_public, u.name AS owner_name
+SELECT t.id, t.owner_id, t.title, t.cover_image, t.description, t.start_date, t.end_date, t.start_location, t.trip_type, t.currency, t.is_public, t.archived_at, t.created_at, t.updated_at, t.show_costs_public, t.budget_amount, t.start_lat, t.start_lng, u.name AS owner_name
 FROM trips t
 JOIN users u ON u.id = t.owner_id
 WHERE t.id = $1 AND t.is_public = true
@@ -44,6 +44,9 @@ func (q *Queries) GetPublicTrip(ctx context.Context, id uuid.UUID) (GetPublicTri
 		&i.Trip.CreatedAt,
 		&i.Trip.UpdatedAt,
 		&i.Trip.ShowCostsPublic,
+		&i.Trip.BudgetAmount,
+		&i.Trip.StartLat,
+		&i.Trip.StartLng,
 		&i.OwnerName,
 	)
 	return i, err
@@ -86,7 +89,7 @@ func (q *Queries) ListPublicPeople(ctx context.Context, tripID uuid.UUID) ([]Lis
 
 const listPublicTrips = `-- name: ListPublicTrips :many
 SELECT
-    t.id, t.owner_id, t.title, t.cover_image, t.description, t.start_date, t.end_date, t.start_location, t.trip_type, t.currency, t.is_public, t.archived_at, t.created_at, t.updated_at, t.show_costs_public,
+    t.id, t.owner_id, t.title, t.cover_image, t.description, t.start_date, t.end_date, t.start_location, t.trip_type, t.currency, t.is_public, t.archived_at, t.created_at, t.updated_at, t.show_costs_public, t.budget_amount, t.start_lat, t.start_lng,
     u.name AS owner_name,
     COALESCE(array_agg(d.name) FILTER (WHERE d.name IS NOT NULL), '{}')::text[] AS destination_names
 FROM trips t
@@ -148,6 +151,9 @@ func (q *Queries) ListPublicTrips(ctx context.Context, arg ListPublicTripsParams
 			&i.Trip.CreatedAt,
 			&i.Trip.UpdatedAt,
 			&i.Trip.ShowCostsPublic,
+			&i.Trip.BudgetAmount,
+			&i.Trip.StartLat,
+			&i.Trip.StartLng,
 			&i.OwnerName,
 			&i.DestinationNames,
 		); err != nil {

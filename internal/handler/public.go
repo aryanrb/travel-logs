@@ -44,6 +44,38 @@ func (h *PublicHandler) Get(c echo.Context) error {
 	return responder.JSONResponse(c, res, http.StatusOK)
 }
 
+// Save/Unsave/ListSaved require auth. Save and Unsave are idempotent and 404 when
+// the trip isn't public.
+func (h *PublicHandler) Save(c echo.Context) error {
+	id, err := pathID(c, "id")
+	if err != nil {
+		return err
+	}
+	if err := h.svc.Save(c.Request().Context(), id, auth.UserID(c)); err != nil {
+		return err
+	}
+	return responder.JSONResponse(c, "saved", http.StatusOK)
+}
+
+func (h *PublicHandler) Unsave(c echo.Context) error {
+	id, err := pathID(c, "id")
+	if err != nil {
+		return err
+	}
+	if err := h.svc.Unsave(c.Request().Context(), id, auth.UserID(c)); err != nil {
+		return err
+	}
+	return responder.JSONResponse(c, "removed", http.StatusOK)
+}
+
+func (h *PublicHandler) ListSaved(c echo.Context) error {
+	res, err := h.svc.ListSaved(c.Request().Context(), auth.UserID(c))
+	if err != nil {
+		return err
+	}
+	return responder.JSONResponse(c, res, http.StatusOK)
+}
+
 // Copy requires auth — the new trip is owned by the caller.
 func (h *PublicHandler) Copy(c echo.Context) error {
 	id, err := pathID(c, "id")

@@ -19,11 +19,24 @@ import (
 type TimelineService struct {
 	q   *models.Queries
 	db  *pgxpool.Pool
+	exp *ExpenseService // for nested expenses created alongside an entry
 	log *zap.Logger
 }
 
 func NewTimelineService() *TimelineService {
-	return &TimelineService{q: models.New(db.Client), db: db.Client, log: zap.L().Named("TimelineService")}
+	return &TimelineService{q: models.New(db.Client), db: db.Client, exp: NewExpenseService(), log: zap.L().Named("TimelineService")}
+}
+
+// createNestedExpense creates the expense supplied inline on an entry, forcing
+// its link to that entry, using the entry's own transaction so both commit or
+// roll back together.
+func (s *TimelineService) createNestedExpense(ctx context.Context, qtx *models.Queries, tripID, userID uuid.UUID, trip models.Trip, entryID uuid.UUID, in types.ExpenseInput) error {
+	in.EntryID = &entryID
+	if err := validateExpenseInput(in); err != nil {
+		return err
+	}
+	_, err := s.exp.insertWithinTx(ctx, qtx, tripID, userID, in, resolveCurrency(trip, in.Currency))
+	return err
 }
 
 func (s *TimelineService) entryInTrip(ctx context.Context, entryID, tripID uuid.UUID) (models.TimelineEntry, error) {
@@ -41,7 +54,8 @@ func (s *TimelineService) entryInTrip(ctx context.Context, entryID, tripID uuid.
 }
 
 func (s *TimelineService) CreateEntry(ctx context.Context, tripID, userID uuid.UUID, in types.EntryInput) (*models.TimelineEntry, error) {
-	if _, _, err := requireContributor(ctx, s.q, tripID, userID); err != nil {
+	_, trip, err := requireContributor(ctx, s.q, tripID, userID)
+	if err != nil {
 		return nil, err
 	}
 	if strings.TrimSpace(in.Title) == "" {
@@ -50,19 +64,34 @@ func (s *TimelineService) CreateEntry(ctx context.Context, tripID, userID uuid.U
 	if in.EntryDate.Time().IsZero() {
 		return nil, apperror.UnprocessableEntity("entry_date is required (YYYY-MM-DD)")
 	}
-	e, err := s.q.InsertEntry(ctx, models.InsertEntryParams{
-		TripID:      tripID,
-		Title:       in.Title,
-		Description: in.Description,
-		EntryDate:   in.EntryDate.Time(),
-		EntryTime:   in.EntryTime,
-		Location:    in.Location,
-		CreatedBy:   userID,
+
+	var created models.TimelineEntry
+	err = inTx(ctx, s.db, s.q, userID, func(qtx *models.Queries) (*activity, error) {
+		e, err := qtx.InsertEntry(ctx, models.InsertEntryParams{
+			TripID:      tripID,
+			Title:       in.Title,
+			Description: in.Description,
+			EntryDate:   in.EntryDate.Time(),
+			EntryTime:   in.EntryTime,
+			Location:    in.Location,
+			CreatedBy:   userID,
+		})
+		if err != nil {
+			return nil, apperror.FromDB(err)
+		}
+		created = e
+		if in.Expense != nil {
+			if err := s.createNestedExpense(ctx, qtx, tripID, userID, trip, e.ID, *in.Expense); err != nil {
+				return nil, err
+			}
+		}
+		return &activity{TripID: tripID, Action: "created", SubjectType: "entry", SubjectID: &e.ID,
+			Data: eventData{Title: e.Title}}, nil
 	})
 	if err != nil {
-		return nil, apperror.FromDB(err)
+		return nil, err
 	}
-	return &e, nil
+	return &created, nil
 }
 
 func (s *TimelineService) ListEntries(ctx context.Context, tripID, userID uuid.UUID) ([]models.TimelineEntry, error) {
@@ -77,7 +106,7 @@ func (s *TimelineService) ListEntries(ctx context.Context, tripID, userID uuid.U
 }
 
 func (s *TimelineService) UpdateEntry(ctx context.Context, tripID, entryID, userID uuid.UUID, in types.EntryInput) error {
-	role, _, err := requireContributor(ctx, s.q, tripID, userID)
+	role, trip, err := requireContributor(ctx, s.q, tripID, userID)
 	if err != nil {
 		return err
 	}
@@ -95,7 +124,7 @@ func (s *TimelineService) UpdateEntry(ctx context.Context, tripID, entryID, user
 		return apperror.UnprocessableEntity("entry_date is required (YYYY-MM-DD)")
 	}
 	uid := userID
-	return apperror.FromDBOrNil(s.q.UpdateEntry(ctx, models.UpdateEntryParams{
+	params := models.UpdateEntryParams{
 		Title:          in.Title,
 		Description:    in.Description,
 		EntryDate:      in.EntryDate.Time(),
@@ -103,7 +132,19 @@ func (s *TimelineService) UpdateEntry(ctx context.Context, tripID, entryID, user
 		Location:       in.Location,
 		LastModifiedBy: &uid,
 		ID:             entryID,
-	}))
+	}
+	return inTx(ctx, s.db, s.q, userID, func(qtx *models.Queries) (*activity, error) {
+		if err := qtx.UpdateEntry(ctx, params); err != nil {
+			return nil, apperror.FromDB(err)
+		}
+		if in.Expense != nil {
+			if err := s.createNestedExpense(ctx, qtx, tripID, userID, trip, entryID, *in.Expense); err != nil {
+				return nil, err
+			}
+		}
+		return &activity{TripID: tripID, Action: "updated", SubjectType: "entry", SubjectID: &entryID,
+			Data: eventData{Title: in.Title}}, nil
+	})
 }
 
 func (s *TimelineService) DeleteEntry(ctx context.Context, tripID, entryID, userID uuid.UUID) error {
@@ -119,8 +160,23 @@ func (s *TimelineService) DeleteEntry(ctx context.Context, tripID, entryID, user
 		return apperror.Forbidden("you can only delete entries you created")
 	}
 	// Photos attached to this entry cascade-delete (migration FK). Trip-level
-	// photos (no entry_id) are unaffected (req 3.9).
-	return apperror.FromDBOrNil(s.q.DeleteEntry(ctx, entryID))
+	// photos (no entry_id) are unaffected (req 3.9). Expenses keep their row with
+	// entry_id set to null (ON DELETE SET NULL).
+	return inTx(ctx, s.db, s.q, userID, func(qtx *models.Queries) (*activity, error) {
+		if err := qtx.DeleteEntry(ctx, entryID); err != nil {
+			return nil, apperror.FromDB(err)
+		}
+		return &activity{TripID: tripID, Action: "deleted", SubjectType: "entry", SubjectID: &e.ID,
+			Data: eventData{Title: e.Title}}, nil
+	})
+}
+
+// photoTitle labels a photo for the activity feed — its caption, or "photo".
+func photoTitle(p models.Photo) string {
+	if p.Caption != nil && strings.TrimSpace(*p.Caption) != "" {
+		return *p.Caption
+	}
+	return "photo"
 }
 
 // ─── Photos ───────────────────────────────────────────────────────────────
@@ -137,18 +193,27 @@ func (s *TimelineService) AddPhoto(ctx context.Context, tripID, userID uuid.UUID
 			return nil, err
 		}
 	}
-	p, err := s.q.InsertPhoto(ctx, models.InsertPhotoParams{
-		TripID:    tripID,
-		EntryID:   in.EntryID,
-		Url:       in.URL,
-		Caption:   in.Caption,
-		TakenDate: types.DatePtr(in.TakenDate),
-		CreatedBy: userID,
+	var created models.Photo
+	err := inTx(ctx, s.db, s.q, userID, func(qtx *models.Queries) (*activity, error) {
+		p, err := qtx.InsertPhoto(ctx, models.InsertPhotoParams{
+			TripID:    tripID,
+			EntryID:   in.EntryID,
+			Url:       in.URL,
+			Caption:   in.Caption,
+			TakenDate: types.DatePtr(in.TakenDate),
+			CreatedBy: userID,
+		})
+		if err != nil {
+			return nil, apperror.FromDB(err)
+		}
+		created = p
+		return &activity{TripID: tripID, Action: "created", SubjectType: "photo", SubjectID: &p.ID,
+			Data: eventData{Title: photoTitle(p)}}, nil
 	})
 	if err != nil {
-		return nil, apperror.FromDB(err)
+		return nil, err
 	}
-	return &p, nil
+	return &created, nil
 }
 
 func (s *TimelineService) ListPhotos(ctx context.Context, tripID, userID uuid.UUID) ([]models.Photo, error) {
@@ -180,5 +245,11 @@ func (s *TimelineService) DeletePhoto(ctx context.Context, tripID, photoID, user
 	if !canModify(role, p.CreatedBy, userID) {
 		return apperror.Forbidden("you can only delete photos you added")
 	}
-	return apperror.FromDBOrNil(s.q.DeletePhoto(ctx, photoID))
+	return inTx(ctx, s.db, s.q, userID, func(qtx *models.Queries) (*activity, error) {
+		if err := qtx.DeletePhoto(ctx, photoID); err != nil {
+			return nil, apperror.FromDB(err)
+		}
+		return &activity{TripID: tripID, Action: "deleted", SubjectType: "photo", SubjectID: &p.ID,
+			Data: eventData{Title: photoTitle(p)}}, nil
+	})
 }

@@ -19,24 +19,25 @@ import (
 type TransportService struct {
 	q   *models.Queries
 	db  *pgxpool.Pool
+	exp *ExpenseService // for nested expenses created alongside a journey
 	log *zap.Logger
 }
 
 func NewTransportService() *TransportService {
-	return &TransportService{q: models.New(db.Client), db: db.Client, log: zap.L().Named("TransportService")}
+	return &TransportService{q: models.New(db.Client), db: db.Client, exp: NewExpenseService(), log: zap.L().Named("TransportService")}
 }
 
-// verifyLinks checks that an optional linked entry/expense belong to this trip,
-// so transport can't be stitched to another trip's records.
-func (s *TransportService) verifyLinks(ctx context.Context, tripID uuid.UUID, entryID, expenseID *uuid.UUID) error {
+// verifyTransportLinks checks that an optional linked entry/expense belong to this
+// trip, so a journey can't be stitched to another trip's records.
+func verifyTransportLinks(ctx context.Context, q *models.Queries, tripID uuid.UUID, entryID, expenseID *uuid.UUID) error {
 	if entryID != nil {
-		e, err := s.q.GetEntry(ctx, *entryID)
+		e, err := q.GetEntry(ctx, *entryID)
 		if err != nil || e.TripID != tripID {
 			return apperror.BadRequest("entry_id does not belong to this trip")
 		}
 	}
 	if expenseID != nil {
-		e, err := s.q.GetExpense(ctx, *expenseID)
+		e, err := q.GetExpense(ctx, *expenseID)
 		if err != nil || e.TripID != tripID {
 			return apperror.BadRequest("expense_id does not belong to this trip")
 		}
@@ -44,34 +45,75 @@ func (s *TransportService) verifyLinks(ctx context.Context, tripID uuid.UUID, en
 	return nil
 }
 
+// journeyTitle labels a journey for the activity feed: its route when both ends
+// are known, else its type.
+func journeyTitle(start, dest *string, typ string) string {
+	if start != nil && dest != nil && *start != "" && *dest != "" {
+		return *start + " → " + *dest
+	}
+	return typ
+}
+
+// nestedExpenseID creates the journey's optional nested expense and returns its id
+// as the expense_id to use (overriding any expense_id in the body). With no nested
+// expense it returns the body's expense_id unchanged.
+func (s *TransportService) nestedExpenseID(ctx context.Context, qtx *models.Queries, tripID, userID uuid.UUID, trip models.Trip, in types.TransportInput) (*uuid.UUID, error) {
+	if in.Expense == nil {
+		return in.ExpenseID, nil
+	}
+	expIn := *in.Expense
+	if err := validateExpenseInput(expIn); err != nil {
+		return nil, err
+	}
+	exp, err := s.exp.insertWithinTx(ctx, qtx, tripID, userID, expIn, resolveCurrency(trip, expIn.Currency))
+	if err != nil {
+		return nil, err
+	}
+	return &exp.ID, nil
+}
+
 func (s *TransportService) Create(ctx context.Context, tripID, userID uuid.UUID, in types.TransportInput) (*models.Transportation, error) {
-	if _, _, err := requireContributor(ctx, s.q, tripID, userID); err != nil {
+	_, trip, err := requireContributor(ctx, s.q, tripID, userID)
+	if err != nil {
 		return nil, err
 	}
 	if strings.TrimSpace(in.Type) == "" {
 		return nil, apperror.UnprocessableEntity("transportation type is required")
 	}
-	if err := s.verifyLinks(ctx, tripID, in.EntryID, in.ExpenseID); err != nil {
-		return nil, err
-	}
-	t, err := s.q.InsertTransport(ctx, models.InsertTransportParams{
-		TripID:      tripID,
-		EntryID:     in.EntryID,
-		ExpenseID:   in.ExpenseID,
-		Type:        in.Type,
-		StartPoint:  in.StartPoint,
-		Destination: in.Destination,
-		DepartAt:    in.DepartAt,
-		DistanceKm:  in.DistanceKm,
-		DurationMin: in.DurationMin,
-		CostAmount:  in.CostAmount,
-		Notes:       in.Notes,
-		CreatedBy:   userID,
+	var created models.Transportation
+	err = inTx(ctx, s.db, s.q, userID, func(qtx *models.Queries) (*activity, error) {
+		expenseID, err := s.nestedExpenseID(ctx, qtx, tripID, userID, trip, in)
+		if err != nil {
+			return nil, err
+		}
+		if err := verifyTransportLinks(ctx, qtx, tripID, in.EntryID, expenseID); err != nil {
+			return nil, err
+		}
+		t, err := qtx.InsertTransport(ctx, models.InsertTransportParams{
+			TripID:      tripID,
+			EntryID:     in.EntryID,
+			ExpenseID:   expenseID,
+			Type:        in.Type,
+			StartPoint:  in.StartPoint,
+			Destination: in.Destination,
+			DepartAt:    in.DepartAt,
+			DistanceKm:  in.DistanceKm,
+			DurationMin: in.DurationMin,
+			CostAmount:  in.CostAmount,
+			Notes:       in.Notes,
+			CreatedBy:   userID,
+		})
+		if err != nil {
+			return nil, apperror.FromDB(err)
+		}
+		created = t
+		return &activity{TripID: tripID, Action: "created", SubjectType: "journey", SubjectID: &t.ID,
+			Data: eventData{Title: journeyTitle(t.StartPoint, t.Destination, t.Type)}}, nil
 	})
 	if err != nil {
-		return nil, apperror.FromDB(err)
+		return nil, err
 	}
-	return &t, nil
+	return &created, nil
 }
 
 func (s *TransportService) List(ctx context.Context, tripID, userID uuid.UUID) ([]models.Transportation, error) {
@@ -100,7 +142,7 @@ func (s *TransportService) transportInTrip(ctx context.Context, id, tripID uuid.
 }
 
 func (s *TransportService) Update(ctx context.Context, tripID, id, userID uuid.UUID, in types.TransportInput) error {
-	role, _, err := requireContributor(ctx, s.q, tripID, userID)
+	role, trip, err := requireContributor(ctx, s.q, tripID, userID)
 	if err != nil {
 		return err
 	}
@@ -114,22 +156,32 @@ func (s *TransportService) Update(ctx context.Context, tripID, id, userID uuid.U
 	if strings.TrimSpace(in.Type) == "" {
 		return apperror.UnprocessableEntity("transportation type is required")
 	}
-	if err := s.verifyLinks(ctx, tripID, in.EntryID, in.ExpenseID); err != nil {
-		return err
-	}
-	return apperror.FromDBOrNil(s.q.UpdateTransport(ctx, models.UpdateTransportParams{
-		EntryID:     in.EntryID,
-		ExpenseID:   in.ExpenseID,
-		Type:        in.Type,
-		StartPoint:  in.StartPoint,
-		Destination: in.Destination,
-		DepartAt:    in.DepartAt,
-		DistanceKm:  in.DistanceKm,
-		DurationMin: in.DurationMin,
-		CostAmount:  in.CostAmount,
-		Notes:       in.Notes,
-		ID:          id,
-	}))
+	return inTx(ctx, s.db, s.q, userID, func(qtx *models.Queries) (*activity, error) {
+		expenseID, err := s.nestedExpenseID(ctx, qtx, tripID, userID, trip, in)
+		if err != nil {
+			return nil, err
+		}
+		if err := verifyTransportLinks(ctx, qtx, tripID, in.EntryID, expenseID); err != nil {
+			return nil, err
+		}
+		if err := qtx.UpdateTransport(ctx, models.UpdateTransportParams{
+			EntryID:     in.EntryID,
+			ExpenseID:   expenseID,
+			Type:        in.Type,
+			StartPoint:  in.StartPoint,
+			Destination: in.Destination,
+			DepartAt:    in.DepartAt,
+			DistanceKm:  in.DistanceKm,
+			DurationMin: in.DurationMin,
+			CostAmount:  in.CostAmount,
+			Notes:       in.Notes,
+			ID:          id,
+		}); err != nil {
+			return nil, apperror.FromDB(err)
+		}
+		return &activity{TripID: tripID, Action: "updated", SubjectType: "journey", SubjectID: &id,
+			Data: eventData{Title: journeyTitle(in.StartPoint, in.Destination, in.Type)}}, nil
+	})
 }
 
 func (s *TransportService) Delete(ctx context.Context, tripID, id, userID uuid.UUID) error {
@@ -144,5 +196,11 @@ func (s *TransportService) Delete(ctx context.Context, tripID, id, userID uuid.U
 	if !canModify(role, t.CreatedBy, userID) {
 		return apperror.Forbidden("you can only delete transportation you created")
 	}
-	return apperror.FromDBOrNil(s.q.DeleteTransport(ctx, id))
+	return inTx(ctx, s.db, s.q, userID, func(qtx *models.Queries) (*activity, error) {
+		if err := qtx.DeleteTransport(ctx, id); err != nil {
+			return nil, apperror.FromDB(err)
+		}
+		return &activity{TripID: tripID, Action: "deleted", SubjectType: "journey", SubjectID: &t.ID,
+			Data: eventData{Title: journeyTitle(t.StartPoint, t.Destination, t.Type)}}, nil
+	})
 }

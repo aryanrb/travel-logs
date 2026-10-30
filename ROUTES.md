@@ -53,10 +53,19 @@ the contract for the frontend.
 | GET | `/v1/trips/:id` | viewer+ | Trip detail `{ trip, destinations, your_role }`. |
 | PUT | `/v1/trips/:id` | owner | Update trip fields. |
 | DELETE | `/v1/trips/:id` | owner | Delete trip and ALL its content (confirm on the frontend). |
-| POST | `/v1/trips/:id/publish` | owner | Body `{is_public: bool}`. Toggles public flag (Phase 2 surface). |
+| POST | `/v1/trips/:id/publish` | owner | Body `{is_public, show_costs_public}`. |
 | POST | `/v1/trips/:id/archive` | owner | Soft-archive (sets `archived_at`). |
+| PUT | `/v1/trips/:id/budget` | owner | Replace the whole budget (one tx). Body `{budget_amount?, category_budgets: [{category, amount}]}`. Returns the trip. |
+| GET | `/v1/trips/:id/activity` | viewer+ | Activity feed. Query `?before=<RFC3339>`. Returns `{events: [...]}`, newest first, max 50. |
 | POST | `/v1/trips/:id/destinations` | owner | Add a destination. Body `{name, arrival_date?, sort_order?}`. |
 | DELETE | `/v1/trips/:id/destinations/:destID` | owner | Remove a destination. |
+
+Every **trip object** (owned/shared list, detail, and POST/PUT/budget responses)
+includes `owner_name` (no email), `budget_amount` (or null), `category_budgets`
+(`[]` when none), and `start_lat`/`start_lng` (null until geocoded). Destinations
+include `lat`/`lng`. Budget `category` must be one of: food, transport,
+accommodation, activities, shopping, groceries, entertainment, health, fees,
+other. 422 for invalid amounts, duplicate or unknown categories.
 
 **Trip create/update body:**
 ```json
@@ -106,7 +115,9 @@ that user.
   "description": "...",          // optional
   "entry_date": "2026-03-02",    // required
   "entry_time": "14:30",         // optional "HH:MM"
-  "location": "Patan"            // optional
+  "location": "Patan",           // optional
+  "expense": { ...expense body... } // optional: records an expense linked to this
+                                    // entry in the same transaction (see Expenses)
 }
 ```
 Each entry records `created_by` and `last_modified_by`.
@@ -189,7 +200,9 @@ parties you list in `shared_among` owe a share.
     { "user_id": "<uuid>" }
   ],
   "notes": "...",                 // optional
-  "receipt_url": "https://..."    // optional
+  "receipt_url": "https://...",   // optional
+  "entry_id": "<uuid>"            // optional link to a timeline entry; must belong
+                                  // to the trip. On PUT, omitting it clears the link.
 }
 ```
 
@@ -280,15 +293,73 @@ appear here too (e.g. a guide owed a reimbursement).
 
 ---
 
+## Public trips, saving & discovery
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/v1/public/trips` | public | Discover public trips. Query `?q=&trip_type=`. `q` matches title, description, start location and destination names. Returns `{trips: [{trip, destinations: [name], owner_name}]}`. |
+| GET | `/v1/public/trips/:id` | public | Public trip detail (404 if not public). `{trip, destinations, people: [{name, role}], entries, transportation, photos, budget}`. People = owner + accepted collaborators. Never exposes emails, user ids, `expense_id`, receipts, payers, shares, settlements or balances. `transportation.cost_amount` only when `show_costs_public`. `budget` is null unless `show_costs_public`, else `{currency, total, travellers, by_category, planned}` (totals exclude hidden expenses; `planned` = the trip's `budget_amount`). |
+| POST | `/v1/public/trips/:id/copy` | user | Copy a public trip into a new private trip you own. Body `{title, start_date}`. Shifts all dates; copies description/type/currency/start location/cover/destinations/entries/journeys. Does **not** copy photos, expenses, settlements, participants, external payers, `expense_id` or `cost_amount`. One tx. Returns the new trip. |
+| PUT | `/v1/public/trips/:id/save` | user | Bookmark a public trip (idempotent; 404 if not public). |
+| DELETE | `/v1/public/trips/:id/save` | user | Remove a bookmark (idempotent; 404 if not public). |
+| GET | `/v1/me/saved-trips` | user | Your saved trips, newest-saved first, public only. Same row shape as `/public/trips`. |
+
+Public trip objects and destinations carry `start_lat`/`start_lng` and `lat`/`lng`.
+
+## Activity feed
+
+Every create/update/delete writes an event in the **same transaction** as the
+change. `GET /v1/trips/:id/activity` returns:
+```json
+{ "events": [ {
+  "id": "<uuid>", "trip_id": "<uuid>",
+  "actor_id": "<uuid>", "actor_name": "Asha",
+  "action": "created",                // created | updated | deleted
+  "subject_type": "expense",          // entry|journey|expense|photo|settlement|participant|trip
+  "subject_id": "<uuid>",             // for participants: the member's user id
+  "data": { "title": "Dinner", "amount": 200000, "currency": "NPR" },
+  "created_at": "2026-03-02T12:00:00Z"
+} ] }
+```
+`data.amount`/`currency` are present for expenses and settlements. Page with
+`?before=<RFC3339>` (the `created_at` of the oldest event you have).
+
+## Expenses in another currency
+
+Expense bodies (including nested expenses) accept `original_currency`,
+`original_amount` (minor units of that currency) and `exchange_rate`
+(trip-currency units per 1 original unit). Send **all three or none**; `rate > 0`
+and `original_currency` must differ from the trip currency (else 422). `amount`
+stays in the trip currency and drives splits and balances. All three are returned
+on every expense response.
+
+## Nested expense on entries & journeys
+
+`POST`/`PUT` on `/entries` and `/transportation` accept an optional `expense`
+object (same shape/validation as the expense body). For entries the expense is
+created with `entry_id` = the entry. For journeys the expense is created first and
+the journey saved with `expense_id` = it (overriding any `expense_id` in the body).
+All in one transaction — if anything fails, nothing is written.
+
+## Map coordinates
+
+Destinations and trip start locations are geocoded in the background via
+Nominatim (set `NOMINATIM_CONTACT` to enable; empty disables it). Coordinates are
+null until resolved; lookups are cached and rate-limited to 1/sec, and failures
+are ignored.
+
+---
+
 ## Phase 1 defaults chosen (confirm with client — PRD §10)
 
 - Invitees must **register/log in** before accepting an invite (no guest mode).
 - Collaborators edit **only their own** entries/expenses/photos/settlements; the
   owner edits anything.
 - A settlement is recorded by **one** authorized participant (no two-party approval).
-- **One currency per trip** (no multi-currency conversion).
-- **Publishing** is just an `is_public` flag + toggle; the public read API and
-  the rest of the community features (discovery, follow, bookmark, likes,
-  comments, tips, moderation) are **Phase 2 — not built yet**.
+- Trip totals/splits are in **one currency per trip**; individual expenses may
+  record an original foreign amount + rate for display (see above).
+- **Publishing**, public discovery/detail, copy-as-template, and bookmarking are
+  built (see the Public trips section). Follow, likes, comments, tips and
+  moderation remain Phase 2.
 - Trip delete is a **hard delete** (cascades). Archive is separate (`archived_at`).
 - Photo/receipt storage is a **URL** the frontend provides; no upload endpoint yet.

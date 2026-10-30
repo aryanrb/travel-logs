@@ -45,7 +45,7 @@ func (q *Queries) DeleteTrip(ctx context.Context, id uuid.UUID) error {
 }
 
 const getTrip = `-- name: GetTrip :one
-SELECT id, owner_id, title, cover_image, description, start_date, end_date, start_location, trip_type, currency, is_public, archived_at, created_at, updated_at, show_costs_public FROM trips WHERE id = $1
+SELECT id, owner_id, title, cover_image, description, start_date, end_date, start_location, trip_type, currency, is_public, archived_at, created_at, updated_at, show_costs_public, budget_amount, start_lat, start_lng FROM trips WHERE id = $1
 `
 
 func (q *Queries) GetTrip(ctx context.Context, id uuid.UUID) (Trip, error) {
@@ -67,6 +67,9 @@ func (q *Queries) GetTrip(ctx context.Context, id uuid.UUID) (Trip, error) {
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.ShowCostsPublic,
+		&i.BudgetAmount,
+		&i.StartLat,
+		&i.StartLng,
 	)
 	return i, err
 }
@@ -74,7 +77,7 @@ func (q *Queries) GetTrip(ctx context.Context, id uuid.UUID) (Trip, error) {
 const insertDestination = `-- name: InsertDestination :one
 INSERT INTO trip_destinations (trip_id, name, arrival_date, sort_order)
 VALUES ($1, $2, $3, $4)
-RETURNING id, trip_id, name, arrival_date, sort_order
+RETURNING id, trip_id, name, arrival_date, sort_order, lat, lng
 `
 
 type InsertDestinationParams struct {
@@ -98,6 +101,8 @@ func (q *Queries) InsertDestination(ctx context.Context, arg InsertDestinationPa
 		&i.Name,
 		&i.ArrivalDate,
 		&i.SortOrder,
+		&i.Lat,
+		&i.Lng,
 	)
 	return i, err
 }
@@ -110,7 +115,7 @@ INSERT INTO trips (
     $1, $2, $3, $4, $5, $6,
     $7, $8, $9
 )
-RETURNING id, owner_id, title, cover_image, description, start_date, end_date, start_location, trip_type, currency, is_public, archived_at, created_at, updated_at, show_costs_public
+RETURNING id, owner_id, title, cover_image, description, start_date, end_date, start_location, trip_type, currency, is_public, archived_at, created_at, updated_at, show_costs_public, budget_amount, start_lat, start_lng
 `
 
 type InsertTripParams struct {
@@ -154,12 +159,15 @@ func (q *Queries) InsertTrip(ctx context.Context, arg InsertTripParams) (Trip, e
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.ShowCostsPublic,
+		&i.BudgetAmount,
+		&i.StartLat,
+		&i.StartLng,
 	)
 	return i, err
 }
 
 const listDestinations = `-- name: ListDestinations :many
-SELECT id, trip_id, name, arrival_date, sort_order FROM trip_destinations WHERE trip_id = $1 ORDER BY sort_order, arrival_date
+SELECT id, trip_id, name, arrival_date, sort_order, lat, lng FROM trip_destinations WHERE trip_id = $1 ORDER BY sort_order, arrival_date
 `
 
 func (q *Queries) ListDestinations(ctx context.Context, tripID uuid.UUID) ([]TripDestination, error) {
@@ -177,6 +185,8 @@ func (q *Queries) ListDestinations(ctx context.Context, tripID uuid.UUID) ([]Tri
 			&i.Name,
 			&i.ArrivalDate,
 			&i.SortOrder,
+			&i.Lat,
+			&i.Lng,
 		); err != nil {
 			return nil, err
 		}
@@ -189,7 +199,7 @@ func (q *Queries) ListDestinations(ctx context.Context, tripID uuid.UUID) ([]Tri
 }
 
 const listOwnedTrips = `-- name: ListOwnedTrips :many
-SELECT id, owner_id, title, cover_image, description, start_date, end_date, start_location, trip_type, currency, is_public, archived_at, created_at, updated_at, show_costs_public FROM trips
+SELECT id, owner_id, title, cover_image, description, start_date, end_date, start_location, trip_type, currency, is_public, archived_at, created_at, updated_at, show_costs_public, budget_amount, start_lat, start_lng FROM trips
 WHERE owner_id = $1
 ORDER BY created_at DESC
 `
@@ -219,6 +229,9 @@ func (q *Queries) ListOwnedTrips(ctx context.Context, ownerID uuid.UUID) ([]Trip
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.ShowCostsPublic,
+			&i.BudgetAmount,
+			&i.StartLat,
+			&i.StartLng,
 		); err != nil {
 			return nil, err
 		}
@@ -231,7 +244,7 @@ func (q *Queries) ListOwnedTrips(ctx context.Context, ownerID uuid.UUID) ([]Trip
 }
 
 const listSharedTrips = `-- name: ListSharedTrips :many
-SELECT trips.id, trips.owner_id, trips.title, trips.cover_image, trips.description, trips.start_date, trips.end_date, trips.start_location, trips.trip_type, trips.currency, trips.is_public, trips.archived_at, trips.created_at, trips.updated_at, trips.show_costs_public, p.role
+SELECT trips.id, trips.owner_id, trips.title, trips.cover_image, trips.description, trips.start_date, trips.end_date, trips.start_location, trips.trip_type, trips.currency, trips.is_public, trips.archived_at, trips.created_at, trips.updated_at, trips.show_costs_public, trips.budget_amount, trips.start_lat, trips.start_lng, p.role
 FROM trips
 JOIN trip_participants p ON p.trip_id = trips.id
 WHERE p.user_id = $1 AND p.status = 'accepted'
@@ -268,6 +281,9 @@ func (q *Queries) ListSharedTrips(ctx context.Context, userID *uuid.UUID) ([]Lis
 			&i.Trip.CreatedAt,
 			&i.Trip.UpdatedAt,
 			&i.Trip.ShowCostsPublic,
+			&i.Trip.BudgetAmount,
+			&i.Trip.StartLat,
+			&i.Trip.StartLng,
 			&i.Role,
 		); err != nil {
 			return nil, err
@@ -278,6 +294,20 @@ func (q *Queries) ListSharedTrips(ctx context.Context, userID *uuid.UUID) ([]Lis
 		return nil, err
 	}
 	return items, nil
+}
+
+const setTripBudget = `-- name: SetTripBudget :exec
+UPDATE trips SET budget_amount = $1, updated_at = now() WHERE id = $2
+`
+
+type SetTripBudgetParams struct {
+	BudgetAmount *int64    `db:"budget_amount" json:"budget_amount"`
+	ID           uuid.UUID `db:"id" json:"id"`
+}
+
+func (q *Queries) SetTripBudget(ctx context.Context, arg SetTripBudgetParams) error {
+	_, err := q.db.Exec(ctx, setTripBudget, arg.BudgetAmount, arg.ID)
+	return err
 }
 
 const setTripPublic = `-- name: SetTripPublic :exec
@@ -292,6 +322,21 @@ type SetTripPublicParams struct {
 
 func (q *Queries) SetTripPublic(ctx context.Context, arg SetTripPublicParams) error {
 	_, err := q.db.Exec(ctx, setTripPublic, arg.IsPublic, arg.ShowCostsPublic, arg.ID)
+	return err
+}
+
+const updateDestinationCoords = `-- name: UpdateDestinationCoords :exec
+UPDATE trip_destinations SET lat = $1, lng = $2 WHERE id = $3
+`
+
+type UpdateDestinationCoordsParams struct {
+	Lat *float64  `db:"lat" json:"lat"`
+	Lng *float64  `db:"lng" json:"lng"`
+	ID  uuid.UUID `db:"id" json:"id"`
+}
+
+func (q *Queries) UpdateDestinationCoords(ctx context.Context, arg UpdateDestinationCoordsParams) error {
+	_, err := q.db.Exec(ctx, updateDestinationCoords, arg.Lat, arg.Lng, arg.ID)
 	return err
 }
 
@@ -333,5 +378,20 @@ func (q *Queries) UpdateTrip(ctx context.Context, arg UpdateTripParams) error {
 		arg.Currency,
 		arg.ID,
 	)
+	return err
+}
+
+const updateTripStartCoords = `-- name: UpdateTripStartCoords :exec
+UPDATE trips SET start_lat = $1, start_lng = $2 WHERE id = $3
+`
+
+type UpdateTripStartCoordsParams struct {
+	StartLat *float64  `db:"start_lat" json:"start_lat"`
+	StartLng *float64  `db:"start_lng" json:"start_lng"`
+	ID       uuid.UUID `db:"id" json:"id"`
+}
+
+func (q *Queries) UpdateTripStartCoords(ctx context.Context, arg UpdateTripStartCoordsParams) error {
+	_, err := q.db.Exec(ctx, updateTripStartCoords, arg.StartLat, arg.StartLng, arg.ID)
 	return err
 }

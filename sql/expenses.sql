@@ -1,10 +1,12 @@
 -- name: InsertExpense :one
 INSERT INTO expenses (
     trip_id, title, amount, currency, category, expense_date,
-    paid_by_user_id, paid_by_external_id, recorded_by, split_method, notes, receipt_url, hide_from_public
+    paid_by_user_id, paid_by_external_id, recorded_by, split_method, notes, receipt_url, hide_from_public, entry_id,
+    original_currency, original_amount, exchange_rate
 ) VALUES (
     @trip_id, @title, @amount, @currency, @category, @expense_date,
-    @paid_by_user_id, @paid_by_external_id, @recorded_by, @split_method, @notes, @receipt_url, @hide_from_public
+    @paid_by_user_id, @paid_by_external_id, @recorded_by, @split_method, @notes, @receipt_url, @hide_from_public, @entry_id,
+    @original_currency, @original_amount, @exchange_rate
 )
 RETURNING *;
 
@@ -27,6 +29,10 @@ UPDATE expenses SET
     notes = @notes,
     receipt_url = @receipt_url,
     hide_from_public = @hide_from_public,
+    entry_id = @entry_id,
+    original_currency = @original_currency,
+    original_amount = @original_amount,
+    exchange_rate = @exchange_rate,
     updated_at = now()
 WHERE id = @id;
 

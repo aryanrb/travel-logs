@@ -62,10 +62,27 @@ func (h *TripHandler) Update(c echo.Context) error {
 	if err := bind(c, &in); err != nil {
 		return err
 	}
-	if err := h.svc.Update(c.Request().Context(), id, auth.UserID(c), in); err != nil {
+	trip, err := h.svc.Update(c.Request().Context(), id, auth.UserID(c), in)
+	if err != nil {
 		return err
 	}
-	return responder.JSONResponse(c, "updated", http.StatusOK)
+	return responder.JSONResponse(c, trip, http.StatusOK)
+}
+
+func (h *TripHandler) SetBudget(c echo.Context) error {
+	id, err := pathID(c, "id")
+	if err != nil {
+		return err
+	}
+	var in types.BudgetInput
+	if err := bind(c, &in); err != nil {
+		return err
+	}
+	trip, err := h.svc.SetBudget(c.Request().Context(), id, auth.UserID(c), in)
+	if err != nil {
+		return err
+	}
+	return responder.JSONResponse(c, trip, http.StatusOK)
 }
 
 func (h *TripHandler) Delete(c echo.Context) error {

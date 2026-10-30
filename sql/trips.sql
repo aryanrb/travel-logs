@@ -39,6 +39,12 @@ WHERE id = @id;
 -- name: SetTripPublic :exec
 UPDATE trips SET is_public = @is_public, show_costs_public = @show_costs_public, updated_at = now() WHERE id = @id;
 
+-- name: SetTripBudget :exec
+UPDATE trips SET budget_amount = @budget_amount, updated_at = now() WHERE id = @id;
+
+-- name: UpdateTripStartCoords :exec
+UPDATE trips SET start_lat = @start_lat, start_lng = @start_lng WHERE id = @id;
+
 -- name: ArchiveTrip :exec
 UPDATE trips SET archived_at = now(), updated_at = now() WHERE id = @id;
 
@@ -52,6 +58,9 @@ RETURNING *;
 
 -- name: ListDestinations :many
 SELECT * FROM trip_destinations WHERE trip_id = @trip_id ORDER BY sort_order, arrival_date;
+
+-- name: UpdateDestinationCoords :exec
+UPDATE trip_destinations SET lat = @lat, lng = @lng WHERE id = @id;
 
 -- name: DeleteDestination :exec
 DELETE FROM trip_destinations WHERE id = @id AND trip_id = @trip_id;

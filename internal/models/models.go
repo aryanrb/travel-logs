@@ -5,6 +5,7 @@
 package models
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
@@ -27,6 +28,10 @@ type Expense struct {
 	CreatedAt        time.Time  `db:"created_at" json:"created_at"`
 	UpdatedAt        time.Time  `db:"updated_at" json:"updated_at"`
 	HideFromPublic   bool       `db:"hide_from_public" json:"hide_from_public"`
+	EntryID          *uuid.UUID `db:"entry_id" json:"entry_id"`
+	OriginalCurrency *string    `db:"original_currency" json:"original_currency"`
+	OriginalAmount   *int64     `db:"original_amount" json:"original_amount"`
+	ExchangeRate     *float64   `db:"exchange_rate" json:"exchange_rate"`
 }
 
 type ExpenseShare struct {
@@ -54,6 +59,12 @@ type Photo struct {
 	TakenDate *time.Time `db:"taken_date" json:"taken_date"`
 	CreatedBy uuid.UUID  `db:"created_by" json:"created_by"`
 	CreatedAt time.Time  `db:"created_at" json:"created_at"`
+}
+
+type SavedTrip struct {
+	UserID    uuid.UUID `db:"user_id" json:"user_id"`
+	TripID    uuid.UUID `db:"trip_id" json:"trip_id"`
+	CreatedAt time.Time `db:"created_at" json:"created_at"`
 }
 
 type Settlement struct {
@@ -118,6 +129,15 @@ type Trip struct {
 	CreatedAt       time.Time  `db:"created_at" json:"created_at"`
 	UpdatedAt       time.Time  `db:"updated_at" json:"updated_at"`
 	ShowCostsPublic bool       `db:"show_costs_public" json:"show_costs_public"`
+	BudgetAmount    *int64     `db:"budget_amount" json:"budget_amount"`
+	StartLat        *float64   `db:"start_lat" json:"start_lat"`
+	StartLng        *float64   `db:"start_lng" json:"start_lng"`
+}
+
+type TripCategoryBudget struct {
+	TripID   uuid.UUID `db:"trip_id" json:"trip_id"`
+	Category string    `db:"category" json:"category"`
+	Amount   int64     `db:"amount" json:"amount"`
 }
 
 type TripDestination struct {
@@ -126,6 +146,20 @@ type TripDestination struct {
 	Name        string     `db:"name" json:"name"`
 	ArrivalDate *time.Time `db:"arrival_date" json:"arrival_date"`
 	SortOrder   int32      `db:"sort_order" json:"sort_order"`
+	Lat         *float64   `db:"lat" json:"lat"`
+	Lng         *float64   `db:"lng" json:"lng"`
+}
+
+type TripEvent struct {
+	ID          uuid.UUID       `db:"id" json:"id"`
+	TripID      uuid.UUID       `db:"trip_id" json:"trip_id"`
+	ActorID     uuid.UUID       `db:"actor_id" json:"actor_id"`
+	ActorName   string          `db:"actor_name" json:"actor_name"`
+	Action      string          `db:"action" json:"action"`
+	SubjectType string          `db:"subject_type" json:"subject_type"`
+	SubjectID   *uuid.UUID      `db:"subject_id" json:"subject_id"`
+	Data        json.RawMessage `db:"data" json:"data"`
+	CreatedAt   time.Time       `db:"created_at" json:"created_at"`
 }
 
 type TripParticipant struct {

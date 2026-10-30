@@ -105,15 +105,49 @@ type SetPublicInput struct {
 	ShowCostsPublic bool `json:"show_costs_public"`
 }
 
+type CategoryBudget struct {
+	Category string `json:"category"`
+	Amount   int64  `json:"amount"`
+}
+
+// TripResponse is a trip plus the fields every trip response carries: owner_name
+// (no email) and category_budgets ([] when none). budget_amount and start coords
+// are trip columns, promoted from the embedded Trip.
+type TripResponse struct {
+	models.Trip
+	OwnerName       string           `json:"owner_name"`
+	CategoryBudgets []CategoryBudget `json:"category_budgets"`
+}
+
+type SharedTripResponse struct {
+	Trip TripResponse `json:"trip"`
+	Role string       `json:"role"`
+}
+
 type TripsListResponse struct {
-	Owned  []models.Trip               `json:"owned"`
-	Shared []models.ListSharedTripsRow `json:"shared"`
+	Owned  []TripResponse       `json:"owned"`
+	Shared []SharedTripResponse `json:"shared"`
 }
 
 type TripDetailResponse struct {
-	Trip         models.Trip              `json:"trip"`
+	Trip         TripResponse             `json:"trip"`
 	Destinations []models.TripDestination `json:"destinations"`
 	YourRole     string                   `json:"your_role"`
+}
+
+// BudgetInput fully replaces a trip's budget. Amounts are minor units, > 0.
+type CategoryBudgetInput struct {
+	Category string `json:"category"`
+	Amount   int64  `json:"amount"`
+}
+
+type BudgetInput struct {
+	BudgetAmount    *int64                `json:"budget_amount"`
+	CategoryBudgets []CategoryBudgetInput `json:"category_budgets"`
+}
+
+type ActivityResponse struct {
+	Events []models.TripEvent `json:"events"`
 }
 
 // ─── Participants ───────────────────────────────────────────────────────────
@@ -136,11 +170,12 @@ type UpdateRoleInput struct {
 // ─── Timeline & photos ──────────────────────────────────────────────────────
 
 type EntryInput struct {
-	Title       string  `json:"title"`
-	Description *string `json:"description"`
-	EntryDate   Date    `json:"entry_date"`
-	EntryTime   *string `json:"entry_time"` // "HH:MM"
-	Location    *string `json:"location"`
+	Title       string        `json:"title"`
+	Description *string       `json:"description"`
+	EntryDate   Date          `json:"entry_date"`
+	EntryTime   *string       `json:"entry_time"` // "HH:MM"
+	Location    *string       `json:"location"`
+	Expense     *ExpenseInput `json:"expense"` // optional: create an expense linked to this entry in the same tx
 }
 
 type PhotoInput struct {
@@ -163,6 +198,9 @@ type TransportInput struct {
 	DurationMin *int32     `json:"duration_min"`
 	CostAmount  *int64     `json:"cost_amount"` // minor units
 	Notes       *string    `json:"notes"`
+	// Optional nested expense: created first, then the journey is saved with
+	// expense_id set to it (overriding any expense_id above), in one transaction.
+	Expense *ExpenseInput `json:"expense"`
 }
 
 // ─── Expenses ───────────────────────────────────────────────────────────────
@@ -197,6 +235,12 @@ type ExpenseInput struct {
 	Notes          *string      `json:"notes"`
 	ReceiptURL     *string      `json:"receipt_url"`
 	HideFromPublic bool         `json:"hide_from_public"`
+	EntryID        *uuid.UUID   `json:"entry_id"` // links the expense to a timeline entry; omit for standalone
+	// Foreign currency: supply all three or none. amount stays in the trip
+	// currency and drives splits/balances; these record the original.
+	OriginalCurrency *string  `json:"original_currency"`
+	OriginalAmount   *int64   `json:"original_amount"` // minor units of original_currency
+	ExchangeRate     *float64 `json:"exchange_rate"`   // trip-currency units per 1 original unit, > 0
 }
 
 type Party struct {
@@ -272,6 +316,8 @@ type PublicTripSafe struct {
 	TripType      *string   `json:"trip_type"`
 	Currency      string    `json:"currency"`
 	IsPublic      bool      `json:"is_public"`
+	StartLat      *float64  `json:"start_lat"`
+	StartLng      *float64  `json:"start_lng"`
 }
 
 type PublicTripListItem struct {
@@ -294,6 +340,8 @@ type PublicDestination struct {
 	Name        string    `json:"name"`
 	ArrivalDate *Date     `json:"arrival_date"`
 	SortOrder   int32     `json:"sort_order"`
+	Lat         *float64  `json:"lat"`
+	Lng         *float64  `json:"lng"`
 }
 
 type PublicEntry struct {
@@ -331,6 +379,7 @@ type PublicBudget struct {
 	Total      int64                               `json:"total"`
 	Travellers int                                 `json:"travellers"`
 	ByCategory []models.PublicCategoryBreakdownRow `json:"by_category"`
+	Planned    *int64                              `json:"planned"` // the trip's budget_amount
 }
 
 type PublicTripDetail struct {

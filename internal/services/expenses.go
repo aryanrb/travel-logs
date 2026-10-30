@@ -196,35 +196,84 @@ func validateExpenseInput(in types.ExpenseInput) error {
 	return nil
 }
 
-func (s *ExpenseService) Create(ctx context.Context, tripID, userID uuid.UUID, in types.ExpenseInput) (*types.ExpenseResponse, error) {
-	_, trip, err := requireContributor(ctx, s.q, tripID, userID)
-	if err != nil {
-		return nil, err
+// resolveCurrency returns the expense currency: the per-expense override when
+// given, otherwise the trip default.
+func resolveCurrency(trip models.Trip, override *string) string {
+	if override != nil && strings.TrimSpace(*override) != "" {
+		return strings.ToUpper(strings.TrimSpace(*override))
 	}
-	if err := validateExpenseInput(in); err != nil {
-		return nil, err
-	}
-	currency := trip.Currency
-	if in.Currency != nil && strings.TrimSpace(*in.Currency) != "" {
-		currency = strings.ToUpper(strings.TrimSpace(*in.Currency))
-	}
+	return trip.Currency
+}
 
-	tx, err := s.db.Begin(ctx)
-	if err != nil {
-		return nil, apperror.Internal("could not start transaction")
+// validateEntryLink ensures an expense's optional entry_id points at a timeline
+// entry in the same trip, so expenses can't be stitched to another trip (422).
+func validateEntryLink(ctx context.Context, q *models.Queries, tripID uuid.UUID, entryID *uuid.UUID) error {
+	if entryID == nil {
+		return nil
 	}
-	defer tx.Rollback(ctx)
-	qtx := s.q.WithTx(tx)
+	e, err := q.GetEntry(ctx, *entryID)
+	if err != nil || e.TripID != tripID {
+		return apperror.UnprocessableEntity("entry_id does not belong to this trip")
+	}
+	return nil
+}
 
+// validateCurrencyFields enforces the foreign-currency rule: the three original_*
+// fields are all present or all absent; rate > 0; original_amount > 0; and the
+// original currency differs from the trip currency.
+func validateCurrencyFields(in types.ExpenseInput, tripCurrency string) error {
+	n := 0
+	for _, set := range []bool{in.OriginalCurrency != nil, in.OriginalAmount != nil, in.ExchangeRate != nil} {
+		if set {
+			n++
+		}
+	}
+	if n == 0 {
+		return nil
+	}
+	if n != 3 {
+		return apperror.UnprocessableEntity("original_currency, original_amount and exchange_rate must be provided together")
+	}
+	if strings.TrimSpace(*in.OriginalCurrency) == "" {
+		return apperror.UnprocessableEntity("original_currency is required")
+	}
+	if *in.ExchangeRate <= 0 {
+		return apperror.UnprocessableEntity("exchange_rate must be greater than 0")
+	}
+	if *in.OriginalAmount <= 0 {
+		return apperror.UnprocessableEntity("original_amount must be greater than 0 (in minor units)")
+	}
+	if strings.EqualFold(strings.TrimSpace(*in.OriginalCurrency), tripCurrency) {
+		return apperror.UnprocessableEntity("original_currency must differ from the trip currency")
+	}
+	return nil
+}
+
+// upperPtr trims and upper-cases an optional currency code.
+func upperPtr(s *string) *string {
+	if s == nil {
+		return nil
+	}
+	u := strings.ToUpper(strings.TrimSpace(*s))
+	return &u
+}
+
+// insertWithinTx inserts an expense and its shares using the given transactional
+// queries, linked to in.EntryID when set. The caller owns the transaction and
+// has already verified contributor permission and resolved the currency. Shared
+// by direct expense creation and the nested expense on a timeline entry.
+func (s *ExpenseService) insertWithinTx(ctx context.Context, qtx *models.Queries, tripID, userID uuid.UUID, in types.ExpenseInput, currency string) (models.Expense, error) {
+	if err := validateCurrencyFields(in, currency); err != nil {
+		return models.Expense{}, err
+	}
 	payerUser, payerExt, err := resolvePartyRef(ctx, qtx, tripID, in.PaidBy)
 	if err != nil {
-		return nil, err
+		return models.Expense{}, err
 	}
 	shares, err := s.computeShares(ctx, qtx, tripID, in)
 	if err != nil {
-		return nil, err
+		return models.Expense{}, err
 	}
-
 	exp, err := qtx.InsertExpense(ctx, models.InsertExpenseParams{
 		TripID:           tripID,
 		Title:            in.Title,
@@ -239,15 +288,52 @@ func (s *ExpenseService) Create(ctx context.Context, tripID, userID uuid.UUID, i
 		Notes:            in.Notes,
 		ReceiptUrl:       in.ReceiptURL,
 		HideFromPublic:   in.HideFromPublic,
+		EntryID:          in.EntryID,
+		OriginalCurrency: upperPtr(in.OriginalCurrency),
+		OriginalAmount:   in.OriginalAmount,
+		ExchangeRate:     in.ExchangeRate,
 	})
 	if err != nil {
-		return nil, apperror.FromDB(err)
+		return models.Expense{}, apperror.FromDB(err)
 	}
 	for _, sh := range shares {
 		sh.ExpenseID = exp.ID
 		if err := qtx.InsertShare(ctx, sh); err != nil {
-			return nil, apperror.FromDB(err)
+			return models.Expense{}, apperror.FromDB(err)
 		}
+	}
+	// Every expense creation — direct or nested on an entry/journey — is logged here.
+	if err := recordActivity(ctx, qtx, userID, activity{
+		TripID: tripID, Action: "created", SubjectType: "expense", SubjectID: &exp.ID,
+		Data: eventData{Title: exp.Title, Amount: &exp.Amount, Currency: &exp.Currency},
+	}); err != nil {
+		return models.Expense{}, err
+	}
+	return exp, nil
+}
+
+func (s *ExpenseService) Create(ctx context.Context, tripID, userID uuid.UUID, in types.ExpenseInput) (*types.ExpenseResponse, error) {
+	_, trip, err := requireContributor(ctx, s.q, tripID, userID)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateExpenseInput(in); err != nil {
+		return nil, err
+	}
+
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return nil, apperror.Internal("could not start transaction")
+	}
+	defer tx.Rollback(ctx)
+	qtx := s.q.WithTx(tx)
+
+	if err := validateEntryLink(ctx, qtx, tripID, in.EntryID); err != nil {
+		return nil, err
+	}
+	exp, err := s.insertWithinTx(ctx, qtx, tripID, userID, in, resolveCurrency(trip, in.Currency))
+	if err != nil {
+		return nil, err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, apperror.Internal("could not save expense")
@@ -306,11 +392,6 @@ func (s *ExpenseService) Update(ctx context.Context, tripID, expenseID, userID u
 	if err := validateExpenseInput(in); err != nil {
 		return nil, err
 	}
-	currency := trip.Currency
-	if in.Currency != nil && strings.TrimSpace(*in.Currency) != "" {
-		currency = strings.ToUpper(strings.TrimSpace(*in.Currency))
-	}
-
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return nil, apperror.Internal("could not start transaction")
@@ -318,6 +399,13 @@ func (s *ExpenseService) Update(ctx context.Context, tripID, expenseID, userID u
 	defer tx.Rollback(ctx)
 	qtx := s.q.WithTx(tx)
 
+	currency := resolveCurrency(trip, in.Currency)
+	if err := validateEntryLink(ctx, qtx, tripID, in.EntryID); err != nil {
+		return nil, err
+	}
+	if err := validateCurrencyFields(in, currency); err != nil {
+		return nil, err
+	}
 	payerUser, payerExt, err := resolvePartyRef(ctx, qtx, tripID, in.PaidBy)
 	if err != nil {
 		return nil, err
@@ -338,6 +426,10 @@ func (s *ExpenseService) Update(ctx context.Context, tripID, expenseID, userID u
 		Notes:            in.Notes,
 		ReceiptUrl:       in.ReceiptURL,
 		HideFromPublic:   in.HideFromPublic,
+		EntryID:          in.EntryID, // omitted in body → nil → NULL
+		OriginalCurrency: upperPtr(in.OriginalCurrency),
+		OriginalAmount:   in.OriginalAmount,
+		ExchangeRate:     in.ExchangeRate,
 		ID:               expenseID,
 	}); err != nil {
 		return nil, apperror.FromDB(err)
@@ -350,6 +442,12 @@ func (s *ExpenseService) Update(ctx context.Context, tripID, expenseID, userID u
 		if err := qtx.InsertShare(ctx, sh); err != nil {
 			return nil, apperror.FromDB(err)
 		}
+	}
+	if err := recordActivity(ctx, qtx, userID, activity{
+		TripID: tripID, Action: "updated", SubjectType: "expense", SubjectID: &expenseID,
+		Data: eventData{Title: in.Title, Amount: &in.Amount, Currency: &currency},
+	}); err != nil {
+		return nil, err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, apperror.Internal("could not update expense")
@@ -373,7 +471,13 @@ func (s *ExpenseService) Delete(ctx context.Context, tripID, expenseID, userID u
 	if !canModify(role, e.RecordedBy, userID) {
 		return apperror.Forbidden("you can only delete expenses you recorded")
 	}
-	return apperror.FromDBOrNil(s.q.DeleteExpense(ctx, expenseID)) // shares cascade
+	return inTx(ctx, s.db, s.q, userID, func(qtx *models.Queries) (*activity, error) {
+		if err := qtx.DeleteExpense(ctx, expenseID); err != nil { // shares cascade
+			return nil, apperror.FromDB(err)
+		}
+		return &activity{TripID: tripID, Action: "deleted", SubjectType: "expense", SubjectID: &e.ID,
+			Data: eventData{Title: e.Title, Amount: &e.Amount, Currency: &e.Currency}}, nil
+	})
 }
 
 func (s *ExpenseService) buildResponse(ctx context.Context, e models.Expense) (*types.ExpenseResponse, error) {

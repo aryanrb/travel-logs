@@ -15,6 +15,7 @@ type Querier interface {
 	ArchiveTrip(ctx context.Context, id uuid.UUID) error
 	CategoryBreakdown(ctx context.Context, tripID uuid.UUID) ([]CategoryBreakdownRow, error)
 	CountTripPhotos(ctx context.Context, tripID uuid.UUID) (int64, error)
+	DeleteCategoryBudgets(ctx context.Context, tripID uuid.UUID) error
 	DeleteDestination(ctx context.Context, arg DeleteDestinationParams) error
 	DeleteEntry(ctx context.Context, id uuid.UUID) error
 	DeleteExpense(ctx context.Context, id uuid.UUID) error
@@ -39,8 +40,10 @@ type Querier interface {
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (User, error)
 	GetUsersByIDs(ctx context.Context, ids []uuid.UUID) ([]GetUsersByIDsRow, error)
+	InsertCategoryBudget(ctx context.Context, arg InsertCategoryBudgetParams) error
 	InsertDestination(ctx context.Context, arg InsertDestinationParams) (TripDestination, error)
 	InsertEntry(ctx context.Context, arg InsertEntryParams) (TimelineEntry, error)
+	InsertEvent(ctx context.Context, arg InsertEventParams) (TripEvent, error)
 	InsertExpense(ctx context.Context, arg InsertExpenseParams) (Expense, error)
 	InsertParticipant(ctx context.Context, arg InsertParticipantParams) (TripParticipant, error)
 	InsertPhoto(ctx context.Context, arg InsertPhotoParams) (Photo, error)
@@ -50,9 +53,13 @@ type Querier interface {
 	InsertTransport(ctx context.Context, arg InsertTransportParams) (Transportation, error)
 	InsertTrip(ctx context.Context, arg InsertTripParams) (Trip, error)
 	InsertUser(ctx context.Context, arg InsertUserParams) (User, error)
+	ListCategoryBudgets(ctx context.Context, tripID uuid.UUID) ([]TripCategoryBudget, error)
+	ListCategoryBudgetsForTrips(ctx context.Context, tripIds []uuid.UUID) ([]TripCategoryBudget, error)
 	ListDestinations(ctx context.Context, tripID uuid.UUID) ([]TripDestination, error)
 	ListEntries(ctx context.Context, tripID uuid.UUID) ([]TimelineEntry, error)
 	ListEntryPhotos(ctx context.Context, entryID *uuid.UUID) ([]Photo, error)
+	// Newest first, keyset-paged on created_at via the optional `before` cursor.
+	ListEvents(ctx context.Context, arg ListEventsParams) ([]TripEvent, error)
 	ListExpenses(ctx context.Context, tripID uuid.UUID) ([]Expense, error)
 	ListExternalPayers(ctx context.Context, tripID uuid.UUID) ([]ExternalPayer, error)
 	ListOwnedTrips(ctx context.Context, ownerID uuid.UUID) ([]Trip, error)
@@ -63,6 +70,8 @@ type Querier interface {
 	// Public discovery. q matches title/description/start_location/destination names
 	// (case-insensitive); trip_type filters exactly. Empty string = no filter.
 	ListPublicTrips(ctx context.Context, arg ListPublicTripsParams) ([]ListPublicTripsRow, error)
+	// Same row shape as ListPublicTrips, newest-saved first, public trips only.
+	ListSavedTrips(ctx context.Context, userID uuid.UUID) ([]ListSavedTripsRow, error)
 	ListSettlements(ctx context.Context, tripID uuid.UUID) ([]Settlement, error)
 	ListSharedTrips(ctx context.Context, userID *uuid.UUID) ([]ListSharedTripsRow, error)
 	ListSharesForExpense(ctx context.Context, expenseID uuid.UUID) ([]ExpenseShare, error)
@@ -71,15 +80,20 @@ type Querier interface {
 	ListTripShares(ctx context.Context, tripID uuid.UUID) ([]ListTripSharesRow, error)
 	PublicCategoryBreakdown(ctx context.Context, tripID uuid.UUID) ([]PublicCategoryBreakdownRow, error)
 	PublicTotalExpenses(ctx context.Context, tripID uuid.UUID) (int64, error)
+	SaveTrip(ctx context.Context, arg SaveTripParams) error
 	SetParticipantStatus(ctx context.Context, arg SetParticipantStatusParams) error
+	SetTripBudget(ctx context.Context, arg SetTripBudgetParams) error
 	SetTripPublic(ctx context.Context, arg SetTripPublicParams) error
 	TotalExpenses(ctx context.Context, tripID uuid.UUID) (int64, error)
 	TransportBreakdown(ctx context.Context, tripID uuid.UUID) ([]TransportBreakdownRow, error)
+	UnsaveTrip(ctx context.Context, arg UnsaveTripParams) error
+	UpdateDestinationCoords(ctx context.Context, arg UpdateDestinationCoordsParams) error
 	UpdateEntry(ctx context.Context, arg UpdateEntryParams) error
 	UpdateExpense(ctx context.Context, arg UpdateExpenseParams) error
 	UpdateParticipantRole(ctx context.Context, arg UpdateParticipantRoleParams) error
 	UpdateTransport(ctx context.Context, arg UpdateTransportParams) error
 	UpdateTrip(ctx context.Context, arg UpdateTripParams) error
+	UpdateTripStartCoords(ctx context.Context, arg UpdateTripStartCoordsParams) error
 	UpdateUserProfile(ctx context.Context, arg UpdateUserProfileParams) error
 	// Reuses an existing payer record (same trip + name) to avoid duplicates (req 3.6).
 	UpsertExternalPayer(ctx context.Context, arg UpsertExternalPayerParams) (ExternalPayer, error)

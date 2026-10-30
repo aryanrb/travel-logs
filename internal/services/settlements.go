@@ -156,7 +156,8 @@ func (s *SettlementService) List(ctx context.Context, tripID, userID uuid.UUID) 
 }
 
 func (s *SettlementService) Create(ctx context.Context, tripID, userID uuid.UUID, in types.SettlementInput) (*models.Settlement, error) {
-	if _, _, err := requireContributor(ctx, s.q, tripID, userID); err != nil {
+	_, trip, err := requireContributor(ctx, s.q, tripID, userID)
+	if err != nil {
 		return nil, err
 	}
 	if in.Amount <= 0 {
@@ -209,6 +210,13 @@ func (s *SettlementService) Create(ctx context.Context, tripID, userID uuid.UUID
 	if err != nil {
 		return nil, apperror.FromDB(err)
 	}
+	cur := trip.Currency
+	if err := recordActivity(ctx, qtx, userID, activity{
+		TripID: tripID, Action: "created", SubjectType: "settlement", SubjectID: &st.ID,
+		Data: eventData{Title: "settlement", Amount: &st.Amount, Currency: &cur},
+	}); err != nil {
+		return nil, err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, apperror.Internal("could not save settlement")
 	}
@@ -216,7 +224,7 @@ func (s *SettlementService) Create(ctx context.Context, tripID, userID uuid.UUID
 }
 
 func (s *SettlementService) Delete(ctx context.Context, tripID, settlementID, userID uuid.UUID) error {
-	role, _, err := requireContributor(ctx, s.q, tripID, userID)
+	role, trip, err := requireContributor(ctx, s.q, tripID, userID)
 	if err != nil {
 		return err
 	}
@@ -233,5 +241,12 @@ func (s *SettlementService) Delete(ctx context.Context, tripID, settlementID, us
 	if !canModify(role, st.RecordedBy, userID) {
 		return apperror.Forbidden("you can only delete settlements you recorded")
 	}
-	return apperror.FromDBOrNil(s.q.DeleteSettlement(ctx, settlementID))
+	return inTx(ctx, s.db, s.q, userID, func(qtx *models.Queries) (*activity, error) {
+		if err := qtx.DeleteSettlement(ctx, settlementID); err != nil {
+			return nil, apperror.FromDB(err)
+		}
+		cur := trip.Currency
+		return &activity{TripID: tripID, Action: "deleted", SubjectType: "settlement", SubjectID: &st.ID,
+			Data: eventData{Title: "settlement", Amount: &st.Amount, Currency: &cur}}, nil
+	})
 }

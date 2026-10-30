@@ -20,6 +20,7 @@ func Load(router *echo.Group) {
 	sh := handlers.NewSettlementHandler()
 	smh := handlers.NewSummaryHandler()
 	pub := handlers.NewPublicHandler()
+	ev := handlers.NewEventHandler()
 
 	// Public — no auth (a bearer token, if sent, is ignored)
 	router.POST("/auth/register", ah.Register)
@@ -32,7 +33,10 @@ func Load(router *echo.Group) {
 	p.GET("/me", ah.Me)
 	p.PUT("/me", ah.UpdateProfile)
 	p.POST("/invites/accept", ph.Accept)
+	p.GET("/me/saved-trips", pub.ListSaved)
 	p.POST("/public/trips/:id/copy", pub.Copy) // copy-as-template needs the caller
+	p.PUT("/public/trips/:id/save", pub.Save)
+	p.DELETE("/public/trips/:id/save", pub.Unsave)
 
 	t := p.Group("/trips")
 	t.POST("", th.Create)
@@ -42,6 +46,8 @@ func Load(router *echo.Group) {
 	t.DELETE("/:id", th.Delete)
 	t.POST("/:id/publish", th.SetPublic)
 	t.POST("/:id/archive", th.Archive)
+	t.PUT("/:id/budget", th.SetBudget)
+	t.GET("/:id/activity", ev.Activity)
 	t.POST("/:id/destinations", th.AddDestination)
 	t.DELETE("/:id/destinations/:destID", th.DeleteDestination)
 

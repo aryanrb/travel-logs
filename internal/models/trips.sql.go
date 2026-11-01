@@ -75,8 +75,8 @@ func (q *Queries) GetTrip(ctx context.Context, id uuid.UUID) (Trip, error) {
 }
 
 const insertDestination = `-- name: InsertDestination :one
-INSERT INTO trip_destinations (trip_id, name, arrival_date, sort_order)
-VALUES ($1, $2, $3, $4)
+INSERT INTO trip_destinations (trip_id, name, arrival_date, sort_order, lat, lng)
+VALUES ($1, $2, $3, $4, $5, $6)
 RETURNING id, trip_id, name, arrival_date, sort_order, lat, lng
 `
 
@@ -85,6 +85,8 @@ type InsertDestinationParams struct {
 	Name        string     `db:"name" json:"name"`
 	ArrivalDate *time.Time `db:"arrival_date" json:"arrival_date"`
 	SortOrder   int32      `db:"sort_order" json:"sort_order"`
+	Lat         *float64   `db:"lat" json:"lat"`
+	Lng         *float64   `db:"lng" json:"lng"`
 }
 
 func (q *Queries) InsertDestination(ctx context.Context, arg InsertDestinationParams) (TripDestination, error) {
@@ -93,6 +95,8 @@ func (q *Queries) InsertDestination(ctx context.Context, arg InsertDestinationPa
 		arg.Name,
 		arg.ArrivalDate,
 		arg.SortOrder,
+		arg.Lat,
+		arg.Lng,
 	)
 	var i TripDestination
 	err := row.Scan(
@@ -110,10 +114,10 @@ func (q *Queries) InsertDestination(ctx context.Context, arg InsertDestinationPa
 const insertTrip = `-- name: InsertTrip :one
 INSERT INTO trips (
     owner_id, title, cover_image, description, start_date, end_date,
-    start_location, trip_type, currency
+    start_location, trip_type, currency, start_lat, start_lng
 ) VALUES (
     $1, $2, $3, $4, $5, $6,
-    $7, $8, $9
+    $7, $8, $9, $10, $11
 )
 RETURNING id, owner_id, title, cover_image, description, start_date, end_date, start_location, trip_type, currency, is_public, archived_at, created_at, updated_at, show_costs_public, budget_amount, start_lat, start_lng
 `
@@ -128,6 +132,8 @@ type InsertTripParams struct {
 	StartLocation *string    `db:"start_location" json:"start_location"`
 	TripType      *string    `db:"trip_type" json:"trip_type"`
 	Currency      string     `db:"currency" json:"currency"`
+	StartLat      *float64   `db:"start_lat" json:"start_lat"`
+	StartLng      *float64   `db:"start_lng" json:"start_lng"`
 }
 
 func (q *Queries) InsertTrip(ctx context.Context, arg InsertTripParams) (Trip, error) {
@@ -141,6 +147,8 @@ func (q *Queries) InsertTrip(ctx context.Context, arg InsertTripParams) (Trip, e
 		arg.StartLocation,
 		arg.TripType,
 		arg.Currency,
+		arg.StartLat,
+		arg.StartLng,
 	)
 	var i Trip
 	err := row.Scan(

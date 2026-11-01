@@ -151,10 +151,10 @@ func TestPublicPrivateTrips404(t *testing.T) {
 	owner := e.user("owner")
 	private := e.trip(owner, "Secret Trip", nil, nil) // never published
 
-	_, err := svc.GetTrip(e.ctx, private)
+	_, err := svc.GetTrip(e.ctx, private, nil)
 	wantStatus(t, err, 404)
 
-	res, err := svc.ListTrips(e.ctx, "", "")
+	res, err := svc.ListTrips(e.ctx, types.ExploreParams{}, nil)
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
@@ -175,7 +175,7 @@ func TestPublicBudgetVisibility(t *testing.T) {
 	e.publish(trip, false)
 	e.expense(trip, owner, 100000, "food", false)
 
-	detail, err := svc.GetTrip(e.ctx, trip)
+	detail, err := svc.GetTrip(e.ctx, trip, nil)
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -187,7 +187,7 @@ func TestPublicBudgetVisibility(t *testing.T) {
 	e.expense(trip, owner, 50000, "food", true)       // hidden — excluded
 	e.expense(trip, owner, 30000, "transport", false) // visible
 
-	detail, err = svc.GetTrip(e.ctx, trip)
+	detail, err = svc.GetTrip(e.ctx, trip, nil)
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
@@ -218,7 +218,7 @@ func TestPublicPeopleRedaction(t *testing.T) {
 		t.Fatalf("external: %v", err)
 	}
 
-	detail, err := svc.GetTrip(e.ctx, trip)
+	detail, err := svc.GetTrip(e.ctx, trip, nil)
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}

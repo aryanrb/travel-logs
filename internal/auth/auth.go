@@ -80,3 +80,19 @@ func UserID(c echo.Context) uuid.UUID {
 	id, _ := c.Get(ctxUserKey).(uuid.UUID)
 	return id
 }
+
+// OptionalUserID returns the caller's id when a valid bearer token is present, or
+// nil otherwise. For auth-optional routes (public discovery, profiles, comments)
+// that are not behind Middleware but include the visitor's own state when signed in.
+func OptionalUserID(c echo.Context) *uuid.UUID {
+	h := c.Request().Header.Get("Authorization")
+	const p = "Bearer "
+	if len(h) <= len(p) || h[:len(p)] != p {
+		return nil
+	}
+	id, err := parseToken(h[len(p):])
+	if err != nil {
+		return nil
+	}
+	return &id
+}

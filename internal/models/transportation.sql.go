@@ -22,7 +22,7 @@ func (q *Queries) DeleteTransport(ctx context.Context, id uuid.UUID) error {
 }
 
 const getTransport = `-- name: GetTransport :one
-SELECT id, trip_id, entry_id, expense_id, type, start_point, destination, depart_at, distance_km, duration_min, cost_amount, notes, created_by, created_at FROM transportation WHERE id = $1
+SELECT id, trip_id, entry_id, expense_id, type, start_point, destination, depart_at, distance_km, duration_min, cost_amount, notes, created_by, created_at, start_lat, start_lng, destination_lat, destination_lng FROM transportation WHERE id = $1
 `
 
 func (q *Queries) GetTransport(ctx context.Context, id uuid.UUID) (Transportation, error) {
@@ -43,6 +43,10 @@ func (q *Queries) GetTransport(ctx context.Context, id uuid.UUID) (Transportatio
 		&i.Notes,
 		&i.CreatedBy,
 		&i.CreatedAt,
+		&i.StartLat,
+		&i.StartLng,
+		&i.DestinationLat,
+		&i.DestinationLng,
 	)
 	return i, err
 }
@@ -50,27 +54,33 @@ func (q *Queries) GetTransport(ctx context.Context, id uuid.UUID) (Transportatio
 const insertTransport = `-- name: InsertTransport :one
 INSERT INTO transportation (
     trip_id, entry_id, expense_id, type, start_point, destination,
-    depart_at, distance_km, duration_min, cost_amount, notes, created_by
+    depart_at, distance_km, duration_min, cost_amount, notes, created_by,
+    start_lat, start_lng, destination_lat, destination_lng
 ) VALUES (
     $1, $2, $3, $4, $5, $6,
-    $7, $8, $9, $10, $11, $12
+    $7, $8, $9, $10, $11, $12,
+    $13, $14, $15, $16
 )
-RETURNING id, trip_id, entry_id, expense_id, type, start_point, destination, depart_at, distance_km, duration_min, cost_amount, notes, created_by, created_at
+RETURNING id, trip_id, entry_id, expense_id, type, start_point, destination, depart_at, distance_km, duration_min, cost_amount, notes, created_by, created_at, start_lat, start_lng, destination_lat, destination_lng
 `
 
 type InsertTransportParams struct {
-	TripID      uuid.UUID  `db:"trip_id" json:"trip_id"`
-	EntryID     *uuid.UUID `db:"entry_id" json:"entry_id"`
-	ExpenseID   *uuid.UUID `db:"expense_id" json:"expense_id"`
-	Type        string     `db:"type" json:"type"`
-	StartPoint  *string    `db:"start_point" json:"start_point"`
-	Destination *string    `db:"destination" json:"destination"`
-	DepartAt    *time.Time `db:"depart_at" json:"depart_at"`
-	DistanceKm  *float64   `db:"distance_km" json:"distance_km"`
-	DurationMin *int32     `db:"duration_min" json:"duration_min"`
-	CostAmount  *int64     `db:"cost_amount" json:"cost_amount"`
-	Notes       *string    `db:"notes" json:"notes"`
-	CreatedBy   uuid.UUID  `db:"created_by" json:"created_by"`
+	TripID         uuid.UUID  `db:"trip_id" json:"trip_id"`
+	EntryID        *uuid.UUID `db:"entry_id" json:"entry_id"`
+	ExpenseID      *uuid.UUID `db:"expense_id" json:"expense_id"`
+	Type           string     `db:"type" json:"type"`
+	StartPoint     *string    `db:"start_point" json:"start_point"`
+	Destination    *string    `db:"destination" json:"destination"`
+	DepartAt       *time.Time `db:"depart_at" json:"depart_at"`
+	DistanceKm     *float64   `db:"distance_km" json:"distance_km"`
+	DurationMin    *int32     `db:"duration_min" json:"duration_min"`
+	CostAmount     *int64     `db:"cost_amount" json:"cost_amount"`
+	Notes          *string    `db:"notes" json:"notes"`
+	CreatedBy      uuid.UUID  `db:"created_by" json:"created_by"`
+	StartLat       *float64   `db:"start_lat" json:"start_lat"`
+	StartLng       *float64   `db:"start_lng" json:"start_lng"`
+	DestinationLat *float64   `db:"destination_lat" json:"destination_lat"`
+	DestinationLng *float64   `db:"destination_lng" json:"destination_lng"`
 }
 
 func (q *Queries) InsertTransport(ctx context.Context, arg InsertTransportParams) (Transportation, error) {
@@ -87,6 +97,10 @@ func (q *Queries) InsertTransport(ctx context.Context, arg InsertTransportParams
 		arg.CostAmount,
 		arg.Notes,
 		arg.CreatedBy,
+		arg.StartLat,
+		arg.StartLng,
+		arg.DestinationLat,
+		arg.DestinationLng,
 	)
 	var i Transportation
 	err := row.Scan(
@@ -104,12 +118,16 @@ func (q *Queries) InsertTransport(ctx context.Context, arg InsertTransportParams
 		&i.Notes,
 		&i.CreatedBy,
 		&i.CreatedAt,
+		&i.StartLat,
+		&i.StartLng,
+		&i.DestinationLat,
+		&i.DestinationLng,
 	)
 	return i, err
 }
 
 const listTransport = `-- name: ListTransport :many
-SELECT id, trip_id, entry_id, expense_id, type, start_point, destination, depart_at, distance_km, duration_min, cost_amount, notes, created_by, created_at FROM transportation WHERE trip_id = $1 ORDER BY depart_at NULLS LAST, created_at
+SELECT id, trip_id, entry_id, expense_id, type, start_point, destination, depart_at, distance_km, duration_min, cost_amount, notes, created_by, created_at, start_lat, start_lng, destination_lat, destination_lng FROM transportation WHERE trip_id = $1 ORDER BY depart_at NULLS LAST, created_at
 `
 
 func (q *Queries) ListTransport(ctx context.Context, tripID uuid.UUID) ([]Transportation, error) {
@@ -136,6 +154,10 @@ func (q *Queries) ListTransport(ctx context.Context, tripID uuid.UUID) ([]Transp
 			&i.Notes,
 			&i.CreatedBy,
 			&i.CreatedAt,
+			&i.StartLat,
+			&i.StartLng,
+			&i.DestinationLat,
+			&i.DestinationLng,
 		); err != nil {
 			return nil, err
 		}
@@ -191,22 +213,30 @@ UPDATE transportation SET
     distance_km = $7,
     duration_min = $8,
     cost_amount = $9,
-    notes = $10
-WHERE id = $11
+    notes = $10,
+    start_lat = $11,
+    start_lng = $12,
+    destination_lat = $13,
+    destination_lng = $14
+WHERE id = $15
 `
 
 type UpdateTransportParams struct {
-	EntryID     *uuid.UUID `db:"entry_id" json:"entry_id"`
-	ExpenseID   *uuid.UUID `db:"expense_id" json:"expense_id"`
-	Type        string     `db:"type" json:"type"`
-	StartPoint  *string    `db:"start_point" json:"start_point"`
-	Destination *string    `db:"destination" json:"destination"`
-	DepartAt    *time.Time `db:"depart_at" json:"depart_at"`
-	DistanceKm  *float64   `db:"distance_km" json:"distance_km"`
-	DurationMin *int32     `db:"duration_min" json:"duration_min"`
-	CostAmount  *int64     `db:"cost_amount" json:"cost_amount"`
-	Notes       *string    `db:"notes" json:"notes"`
-	ID          uuid.UUID  `db:"id" json:"id"`
+	EntryID        *uuid.UUID `db:"entry_id" json:"entry_id"`
+	ExpenseID      *uuid.UUID `db:"expense_id" json:"expense_id"`
+	Type           string     `db:"type" json:"type"`
+	StartPoint     *string    `db:"start_point" json:"start_point"`
+	Destination    *string    `db:"destination" json:"destination"`
+	DepartAt       *time.Time `db:"depart_at" json:"depart_at"`
+	DistanceKm     *float64   `db:"distance_km" json:"distance_km"`
+	DurationMin    *int32     `db:"duration_min" json:"duration_min"`
+	CostAmount     *int64     `db:"cost_amount" json:"cost_amount"`
+	Notes          *string    `db:"notes" json:"notes"`
+	StartLat       *float64   `db:"start_lat" json:"start_lat"`
+	StartLng       *float64   `db:"start_lng" json:"start_lng"`
+	DestinationLat *float64   `db:"destination_lat" json:"destination_lat"`
+	DestinationLng *float64   `db:"destination_lng" json:"destination_lng"`
+	ID             uuid.UUID  `db:"id" json:"id"`
 }
 
 func (q *Queries) UpdateTransport(ctx context.Context, arg UpdateTransportParams) error {
@@ -221,6 +251,10 @@ func (q *Queries) UpdateTransport(ctx context.Context, arg UpdateTransportParams
 		arg.DurationMin,
 		arg.CostAmount,
 		arg.Notes,
+		arg.StartLat,
+		arg.StartLng,
+		arg.DestinationLat,
+		arg.DestinationLng,
 		arg.ID,
 	)
 	return err

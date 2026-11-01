@@ -30,3 +30,15 @@ UPDATE trip_participants
 SET status = 'accepted', user_id = @user_id, accepted_at = now()
 WHERE invite_token = @invite_token AND status = 'pending'
 RETURNING *;
+
+-- name: UpsertRSVPParticipant :exec
+-- RSVP Going/Maybe grants accepted access with the given role, creating or
+-- reactivating the (trip, user) participant row.
+INSERT INTO trip_participants (trip_id, user_id, role, status, accepted_at)
+VALUES (@trip_id, @user_id, @role, 'accepted', now())
+ON CONFLICT (trip_id, user_id) WHERE user_id IS NOT NULL
+DO UPDATE SET role = EXCLUDED.role, status = 'accepted', accepted_at = now();
+
+-- name: RevokeParticipantByUser :exec
+-- Revokes a user's access to a trip (RSVP changed away from Going / reply removed).
+UPDATE trip_participants SET status = 'revoked' WHERE trip_id = @trip_id AND user_id = @user_id;

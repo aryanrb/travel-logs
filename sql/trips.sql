@@ -1,10 +1,10 @@
 -- name: InsertTrip :one
 INSERT INTO trips (
     owner_id, title, cover_image, description, start_date, end_date,
-    start_location, trip_type, currency
+    start_location, trip_type, currency, start_lat, start_lng
 ) VALUES (
     @owner_id, @title, @cover_image, @description, @start_date, @end_date,
-    @start_location, @trip_type, @currency
+    @start_location, @trip_type, @currency, @start_lat, @start_lng
 )
 RETURNING *;
 
@@ -52,8 +52,8 @@ UPDATE trips SET archived_at = now(), updated_at = now() WHERE id = @id;
 DELETE FROM trips WHERE id = @id;
 
 -- name: InsertDestination :one
-INSERT INTO trip_destinations (trip_id, name, arrival_date, sort_order)
-VALUES (@trip_id, @name, @arrival_date, @sort_order)
+INSERT INTO trip_destinations (trip_id, name, arrival_date, sort_order, lat, lng)
+VALUES (@trip_id, @name, @arrival_date, @sort_order, @lat, @lng)
 RETURNING *;
 
 -- name: ListDestinations :many

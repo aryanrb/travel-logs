@@ -249,6 +249,22 @@ func validateCurrencyFields(in types.ExpenseInput, tripCurrency string) error {
 	return nil
 }
 
+// validateFromPool enforces that a pool expense exists and is paid by the pool
+// collector (so spending from the pool is modelled as the collector paying).
+func validateFromPool(ctx context.Context, q *models.Queries, tripID uuid.UUID, in types.ExpenseInput) error {
+	if !in.FromPool {
+		return nil
+	}
+	pool, err := q.GetPool(ctx, tripID)
+	if err != nil {
+		return apperror.UnprocessableEntity("this trip has no pool")
+	}
+	if in.PaidBy.UserID == nil || *in.PaidBy.UserID != pool.CollectorID {
+		return apperror.UnprocessableEntity("a pool expense must be paid by the collector")
+	}
+	return nil
+}
+
 // upperPtr trims and upper-cases an optional currency code.
 func upperPtr(s *string) *string {
 	if s == nil {
@@ -264,6 +280,9 @@ func upperPtr(s *string) *string {
 // by direct expense creation and the nested expense on a timeline entry.
 func (s *ExpenseService) insertWithinTx(ctx context.Context, qtx *models.Queries, tripID, userID uuid.UUID, in types.ExpenseInput, currency string) (models.Expense, error) {
 	if err := validateCurrencyFields(in, currency); err != nil {
+		return models.Expense{}, err
+	}
+	if err := validateFromPool(ctx, qtx, tripID, in); err != nil {
 		return models.Expense{}, err
 	}
 	payerUser, payerExt, err := resolvePartyRef(ctx, qtx, tripID, in.PaidBy)
@@ -292,6 +311,7 @@ func (s *ExpenseService) insertWithinTx(ctx context.Context, qtx *models.Queries
 		OriginalCurrency: upperPtr(in.OriginalCurrency),
 		OriginalAmount:   in.OriginalAmount,
 		ExchangeRate:     in.ExchangeRate,
+		FromPool:         in.FromPool,
 	})
 	if err != nil {
 		return models.Expense{}, apperror.FromDB(err)
@@ -406,6 +426,9 @@ func (s *ExpenseService) Update(ctx context.Context, tripID, expenseID, userID u
 	if err := validateCurrencyFields(in, currency); err != nil {
 		return nil, err
 	}
+	if err := validateFromPool(ctx, qtx, tripID, in); err != nil {
+		return nil, err
+	}
 	payerUser, payerExt, err := resolvePartyRef(ctx, qtx, tripID, in.PaidBy)
 	if err != nil {
 		return nil, err
@@ -430,6 +453,7 @@ func (s *ExpenseService) Update(ctx context.Context, tripID, expenseID, userID u
 		OriginalCurrency: upperPtr(in.OriginalCurrency),
 		OriginalAmount:   in.OriginalAmount,
 		ExchangeRate:     in.ExchangeRate,
+		FromPool:         in.FromPool,
 		ID:               expenseID,
 	}); err != nil {
 		return nil, apperror.FromDB(err)

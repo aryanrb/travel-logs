@@ -13,4 +13,4 @@ SELECT * FROM users WHERE id = @id;
 SELECT id, name, email, photo_url FROM users WHERE id = ANY(@ids::uuid[]);
 
 -- name: UpdateUserProfile :exec
-UPDATE users SET name = @name, photo_url = @photo_url WHERE id = @id;
+UPDATE users SET name = @name, photo_url = @photo_url, bio = @bio WHERE id = @id;

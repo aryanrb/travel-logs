@@ -161,7 +161,7 @@ func TestPublicBudgetPlanned(t *testing.T) {
 	}
 	e.publish(trip, true)
 
-	detail, err := pub.GetTrip(e.ctx, trip)
+	detail, err := pub.GetTrip(e.ctx, trip, nil)
 	if err != nil {
 		t.Fatalf("public get: %v", err)
 	}

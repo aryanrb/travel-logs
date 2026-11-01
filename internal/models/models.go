@@ -11,6 +11,22 @@ import (
 	"github.com/google/uuid"
 )
 
+type Block struct {
+	BlockerID uuid.UUID `db:"blocker_id" json:"blocker_id"`
+	BlockedID uuid.UUID `db:"blocked_id" json:"blocked_id"`
+	CreatedAt time.Time `db:"created_at" json:"created_at"`
+}
+
+type Comment struct {
+	ID        uuid.UUID  `db:"id" json:"id"`
+	TripID    uuid.UUID  `db:"trip_id" json:"trip_id"`
+	AuthorID  uuid.UUID  `db:"author_id" json:"author_id"`
+	ParentID  *uuid.UUID `db:"parent_id" json:"parent_id"`
+	Body      string     `db:"body" json:"body"`
+	CreatedAt time.Time  `db:"created_at" json:"created_at"`
+	EditedAt  *time.Time `db:"edited_at" json:"edited_at"`
+}
+
 type Expense struct {
 	ID               uuid.UUID  `db:"id" json:"id"`
 	TripID           uuid.UUID  `db:"trip_id" json:"trip_id"`
@@ -32,6 +48,7 @@ type Expense struct {
 	OriginalCurrency *string    `db:"original_currency" json:"original_currency"`
 	OriginalAmount   *int64     `db:"original_amount" json:"original_amount"`
 	ExchangeRate     *float64   `db:"exchange_rate" json:"exchange_rate"`
+	FromPool         bool       `db:"from_pool" json:"from_pool"`
 }
 
 type ExpenseShare struct {
@@ -50,6 +67,45 @@ type ExternalPayer struct {
 	CreatedAt time.Time `db:"created_at" json:"created_at"`
 }
 
+type Follow struct {
+	FollowerID uuid.UUID `db:"follower_id" json:"follower_id"`
+	FolloweeID uuid.UUID `db:"followee_id" json:"followee_id"`
+	CreatedAt  time.Time `db:"created_at" json:"created_at"`
+}
+
+type Friendship struct {
+	RequesterID uuid.UUID `db:"requester_id" json:"requester_id"`
+	AddresseeID uuid.UUID `db:"addressee_id" json:"addressee_id"`
+	Status      string    `db:"status" json:"status"`
+	CreatedAt   time.Time `db:"created_at" json:"created_at"`
+}
+
+type InviteLink struct {
+	ID        uuid.UUID  `db:"id" json:"id"`
+	TripID    uuid.UUID  `db:"trip_id" json:"trip_id"`
+	Token     string     `db:"token" json:"token"`
+	Active    bool       `db:"active" json:"active"`
+	JoinMode  string     `db:"join_mode" json:"join_mode"`
+	Spots     *int32     `db:"spots" json:"spots"`
+	ReplyBy   *time.Time `db:"reply_by" json:"reply_by"`
+	Role      string     `db:"role" json:"role"`
+	Message   *string    `db:"message" json:"message"`
+	CreatedAt time.Time  `db:"created_at" json:"created_at"`
+	UpdatedAt time.Time  `db:"updated_at" json:"updated_at"`
+}
+
+type Notification struct {
+	ID         uuid.UUID  `db:"id" json:"id"`
+	UserID     uuid.UUID  `db:"user_id" json:"user_id"`
+	Type       string     `db:"type" json:"type"`
+	ActorID    *uuid.UUID `db:"actor_id" json:"actor_id"`
+	TripID     *uuid.UUID `db:"trip_id" json:"trip_id"`
+	CommentID  *uuid.UUID `db:"comment_id" json:"comment_id"`
+	RsvpStatus *string    `db:"rsvp_status" json:"rsvp_status"`
+	Read       bool       `db:"read" json:"read"`
+	CreatedAt  time.Time  `db:"created_at" json:"created_at"`
+}
+
 type Photo struct {
 	ID        uuid.UUID  `db:"id" json:"id"`
 	TripID    uuid.UUID  `db:"trip_id" json:"trip_id"`
@@ -59,6 +115,27 @@ type Photo struct {
 	TakenDate *time.Time `db:"taken_date" json:"taken_date"`
 	CreatedBy uuid.UUID  `db:"created_by" json:"created_by"`
 	CreatedAt time.Time  `db:"created_at" json:"created_at"`
+}
+
+type Report struct {
+	ID          uuid.UUID `db:"id" json:"id"`
+	ReporterID  uuid.UUID `db:"reporter_id" json:"reporter_id"`
+	SubjectType string    `db:"subject_type" json:"subject_type"`
+	SubjectID   uuid.UUID `db:"subject_id" json:"subject_id"`
+	Reason      string    `db:"reason" json:"reason"`
+	Details     *string   `db:"details" json:"details"`
+	Status      string    `db:"status" json:"status"`
+	CreatedAt   time.Time `db:"created_at" json:"created_at"`
+}
+
+type Rsvp struct {
+	ID        uuid.UUID `db:"id" json:"id"`
+	TripID    uuid.UUID `db:"trip_id" json:"trip_id"`
+	UserID    uuid.UUID `db:"user_id" json:"user_id"`
+	Status    string    `db:"status" json:"status"`
+	Chosen    string    `db:"chosen" json:"chosen"`
+	CreatedAt time.Time `db:"created_at" json:"created_at"`
+	RepliedAt time.Time `db:"replied_at" json:"replied_at"`
 }
 
 type SavedTrip struct {
@@ -80,6 +157,7 @@ type Settlement struct {
 	Notes          *string    `db:"notes" json:"notes"`
 	RecordedBy     uuid.UUID  `db:"recorded_by" json:"recorded_by"`
 	CreatedAt      time.Time  `db:"created_at" json:"created_at"`
+	Kind           string     `db:"kind" json:"kind"`
 }
 
 type TimelineEntry struct {
@@ -94,23 +172,29 @@ type TimelineEntry struct {
 	LastModifiedBy *uuid.UUID `db:"last_modified_by" json:"last_modified_by"`
 	CreatedAt      time.Time  `db:"created_at" json:"created_at"`
 	UpdatedAt      time.Time  `db:"updated_at" json:"updated_at"`
+	Lat            *float64   `db:"lat" json:"lat"`
+	Lng            *float64   `db:"lng" json:"lng"`
 }
 
 type Transportation struct {
-	ID          uuid.UUID  `db:"id" json:"id"`
-	TripID      uuid.UUID  `db:"trip_id" json:"trip_id"`
-	EntryID     *uuid.UUID `db:"entry_id" json:"entry_id"`
-	ExpenseID   *uuid.UUID `db:"expense_id" json:"expense_id"`
-	Type        string     `db:"type" json:"type"`
-	StartPoint  *string    `db:"start_point" json:"start_point"`
-	Destination *string    `db:"destination" json:"destination"`
-	DepartAt    *time.Time `db:"depart_at" json:"depart_at"`
-	DistanceKm  *float64   `db:"distance_km" json:"distance_km"`
-	DurationMin *int32     `db:"duration_min" json:"duration_min"`
-	CostAmount  *int64     `db:"cost_amount" json:"cost_amount"`
-	Notes       *string    `db:"notes" json:"notes"`
-	CreatedBy   uuid.UUID  `db:"created_by" json:"created_by"`
-	CreatedAt   time.Time  `db:"created_at" json:"created_at"`
+	ID             uuid.UUID  `db:"id" json:"id"`
+	TripID         uuid.UUID  `db:"trip_id" json:"trip_id"`
+	EntryID        *uuid.UUID `db:"entry_id" json:"entry_id"`
+	ExpenseID      *uuid.UUID `db:"expense_id" json:"expense_id"`
+	Type           string     `db:"type" json:"type"`
+	StartPoint     *string    `db:"start_point" json:"start_point"`
+	Destination    *string    `db:"destination" json:"destination"`
+	DepartAt       *time.Time `db:"depart_at" json:"depart_at"`
+	DistanceKm     *float64   `db:"distance_km" json:"distance_km"`
+	DurationMin    *int32     `db:"duration_min" json:"duration_min"`
+	CostAmount     *int64     `db:"cost_amount" json:"cost_amount"`
+	Notes          *string    `db:"notes" json:"notes"`
+	CreatedBy      uuid.UUID  `db:"created_by" json:"created_by"`
+	CreatedAt      time.Time  `db:"created_at" json:"created_at"`
+	StartLat       *float64   `db:"start_lat" json:"start_lat"`
+	StartLng       *float64   `db:"start_lng" json:"start_lng"`
+	DestinationLat *float64   `db:"destination_lat" json:"destination_lat"`
+	DestinationLng *float64   `db:"destination_lng" json:"destination_lng"`
 }
 
 type Trip struct {
@@ -162,6 +246,12 @@ type TripEvent struct {
 	CreatedAt   time.Time       `db:"created_at" json:"created_at"`
 }
 
+type TripLike struct {
+	UserID    uuid.UUID `db:"user_id" json:"user_id"`
+	TripID    uuid.UUID `db:"trip_id" json:"trip_id"`
+	CreatedAt time.Time `db:"created_at" json:"created_at"`
+}
+
 type TripParticipant struct {
 	ID           uuid.UUID  `db:"id" json:"id"`
 	TripID       uuid.UUID  `db:"trip_id" json:"trip_id"`
@@ -174,6 +264,15 @@ type TripParticipant struct {
 	AcceptedAt   *time.Time `db:"accepted_at" json:"accepted_at"`
 }
 
+type TripPool struct {
+	TripID      uuid.UUID  `db:"trip_id" json:"trip_id"`
+	CollectorID uuid.UUID  `db:"collector_id" json:"collector_id"`
+	PerPerson   int64      `db:"per_person" json:"per_person"`
+	DueDate     *time.Time `db:"due_date" json:"due_date"`
+	CreatedAt   time.Time  `db:"created_at" json:"created_at"`
+	UpdatedAt   time.Time  `db:"updated_at" json:"updated_at"`
+}
+
 type User struct {
 	ID           uuid.UUID `db:"id" json:"id"`
 	Email        string    `db:"email" json:"email"`
@@ -181,4 +280,5 @@ type User struct {
 	Name         string    `db:"name" json:"name"`
 	PhotoUrl     *string   `db:"photo_url" json:"photo_url"`
 	CreatedAt    time.Time `db:"created_at" json:"created_at"`
+	Bio          *string   `db:"bio" json:"bio"`
 }

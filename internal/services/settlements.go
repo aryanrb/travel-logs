@@ -173,6 +173,13 @@ func (s *SettlementService) Create(ctx context.Context, tripID, userID uuid.UUID
 		}
 		status = *in.Status
 	}
+	kind := "repayment"
+	if in.Kind != nil {
+		if *in.Kind != "repayment" && *in.Kind != "contribution" {
+			return nil, apperror.UnprocessableEntity("kind must be 'repayment' or 'contribution'")
+		}
+		kind = *in.Kind
+	}
 
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
@@ -195,6 +202,19 @@ func (s *SettlementService) Create(ctx context.Context, tripID, userID uuid.UUID
 		return nil, apperror.UnprocessableEntity("a settlement must be between two different parties")
 	}
 
+	// A contribution is money into the pool: the recipient must be the collector.
+	var collectorID *uuid.UUID
+	if kind == "contribution" {
+		pool, err := qtx.GetPool(ctx, tripID)
+		if err != nil {
+			return nil, apperror.UnprocessableEntity("this trip has no pool to contribute to")
+		}
+		if toUser == nil || *toUser != pool.CollectorID {
+			return nil, apperror.UnprocessableEntity("a contribution must be paid to the pool collector")
+		}
+		collectorID = &pool.CollectorID
+	}
+
 	st, err := qtx.InsertSettlement(ctx, models.InsertSettlementParams{
 		TripID:         tripID,
 		FromUserID:     fromUser,
@@ -206,6 +226,7 @@ func (s *SettlementService) Create(ctx context.Context, tripID, userID uuid.UUID
 		Status:         status,
 		Notes:          in.Notes,
 		RecordedBy:     userID,
+		Kind:           kind,
 	})
 	if err != nil {
 		return nil, apperror.FromDB(err)
@@ -220,7 +241,38 @@ func (s *SettlementService) Create(ctx context.Context, tripID, userID uuid.UUID
 	if err := tx.Commit(ctx); err != nil {
 		return nil, apperror.Internal("could not save settlement")
 	}
+	// A pending contribution ("I've paid in") pings the collector.
+	if kind == "contribution" && status == "pending" && collectorID != nil {
+		notify(ctx, s.q, notifyParams{UserID: *collectorID, Type: "pool_contribution", ActorID: &userID, TripID: &tripID})
+	}
 	return &st, nil
+}
+
+// Confirm marks a pending settlement completed. Allowed for the receiver (the
+// collector, for a contribution) and the trip owner.
+func (s *SettlementService) Confirm(ctx context.Context, tripID, settlementID, userID uuid.UUID) error {
+	role, _, err := requireViewer(ctx, s.q, tripID, userID)
+	if err != nil {
+		return err
+	}
+	st, err := s.q.GetSettlement(ctx, settlementID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return apperror.NotFound("settlement not found")
+		}
+		return apperror.FromDB(err)
+	}
+	if st.TripID != tripID {
+		return apperror.NotFound("settlement not found")
+	}
+	if st.Status != "pending" {
+		return apperror.Conflict("this settlement is not pending")
+	}
+	isReceiver := st.ToUserID != nil && *st.ToUserID == userID
+	if role != RoleOwner && !isReceiver {
+		return apperror.Forbidden("only the recipient or the trip owner can confirm this")
+	}
+	return apperror.FromDBOrNil(s.q.ConfirmSettlement(ctx, settlementID))
 }
 
 func (s *SettlementService) Delete(ctx context.Context, tripID, settlementID, userID uuid.UUID) error {

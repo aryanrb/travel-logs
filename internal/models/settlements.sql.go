@@ -22,7 +22,7 @@ func (q *Queries) DeleteSettlement(ctx context.Context, id uuid.UUID) error {
 }
 
 const getSettlement = `-- name: GetSettlement :one
-SELECT id, trip_id, from_user_id, from_external_id, to_user_id, to_external_id, amount, settled_date, status, notes, recorded_by, created_at FROM settlements WHERE id = $1
+SELECT id, trip_id, from_user_id, from_external_id, to_user_id, to_external_id, amount, settled_date, status, notes, recorded_by, created_at, kind FROM settlements WHERE id = $1
 `
 
 func (q *Queries) GetSettlement(ctx context.Context, id uuid.UUID) (Settlement, error) {
@@ -41,6 +41,7 @@ func (q *Queries) GetSettlement(ctx context.Context, id uuid.UUID) (Settlement, 
 		&i.Notes,
 		&i.RecordedBy,
 		&i.CreatedAt,
+		&i.Kind,
 	)
 	return i, err
 }
@@ -48,12 +49,12 @@ func (q *Queries) GetSettlement(ctx context.Context, id uuid.UUID) (Settlement, 
 const insertSettlement = `-- name: InsertSettlement :one
 INSERT INTO settlements (
     trip_id, from_user_id, from_external_id, to_user_id, to_external_id,
-    amount, settled_date, status, notes, recorded_by
+    amount, settled_date, status, notes, recorded_by, kind
 ) VALUES (
     $1, $2, $3, $4, $5,
-    $6, $7, $8, $9, $10
+    $6, $7, $8, $9, $10, $11
 )
-RETURNING id, trip_id, from_user_id, from_external_id, to_user_id, to_external_id, amount, settled_date, status, notes, recorded_by, created_at
+RETURNING id, trip_id, from_user_id, from_external_id, to_user_id, to_external_id, amount, settled_date, status, notes, recorded_by, created_at, kind
 `
 
 type InsertSettlementParams struct {
@@ -67,6 +68,7 @@ type InsertSettlementParams struct {
 	Status         string     `db:"status" json:"status"`
 	Notes          *string    `db:"notes" json:"notes"`
 	RecordedBy     uuid.UUID  `db:"recorded_by" json:"recorded_by"`
+	Kind           string     `db:"kind" json:"kind"`
 }
 
 func (q *Queries) InsertSettlement(ctx context.Context, arg InsertSettlementParams) (Settlement, error) {
@@ -81,6 +83,7 @@ func (q *Queries) InsertSettlement(ctx context.Context, arg InsertSettlementPara
 		arg.Status,
 		arg.Notes,
 		arg.RecordedBy,
+		arg.Kind,
 	)
 	var i Settlement
 	err := row.Scan(
@@ -96,12 +99,13 @@ func (q *Queries) InsertSettlement(ctx context.Context, arg InsertSettlementPara
 		&i.Notes,
 		&i.RecordedBy,
 		&i.CreatedAt,
+		&i.Kind,
 	)
 	return i, err
 }
 
 const listSettlements = `-- name: ListSettlements :many
-SELECT id, trip_id, from_user_id, from_external_id, to_user_id, to_external_id, amount, settled_date, status, notes, recorded_by, created_at FROM settlements WHERE trip_id = $1 ORDER BY settled_date DESC, created_at DESC
+SELECT id, trip_id, from_user_id, from_external_id, to_user_id, to_external_id, amount, settled_date, status, notes, recorded_by, created_at, kind FROM settlements WHERE trip_id = $1 ORDER BY settled_date DESC, created_at DESC
 `
 
 func (q *Queries) ListSettlements(ctx context.Context, tripID uuid.UUID) ([]Settlement, error) {
@@ -126,6 +130,7 @@ func (q *Queries) ListSettlements(ctx context.Context, tripID uuid.UUID) ([]Sett
 			&i.Notes,
 			&i.RecordedBy,
 			&i.CreatedAt,
+			&i.Kind,
 		); err != nil {
 			return nil, err
 		}

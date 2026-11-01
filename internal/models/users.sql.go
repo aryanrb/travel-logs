@@ -12,7 +12,7 @@ import (
 )
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, email, password_hash, name, photo_url, created_at FROM users WHERE email = $1
+SELECT id, email, password_hash, name, photo_url, created_at, bio FROM users WHERE email = $1
 `
 
 func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error) {
@@ -25,12 +25,13 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.Name,
 		&i.PhotoUrl,
 		&i.CreatedAt,
+		&i.Bio,
 	)
 	return i, err
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, email, password_hash, name, photo_url, created_at FROM users WHERE id = $1
+SELECT id, email, password_hash, name, photo_url, created_at, bio FROM users WHERE id = $1
 `
 
 func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
@@ -43,6 +44,7 @@ func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
 		&i.Name,
 		&i.PhotoUrl,
 		&i.CreatedAt,
+		&i.Bio,
 	)
 	return i, err
 }
@@ -86,7 +88,7 @@ func (q *Queries) GetUsersByIDs(ctx context.Context, ids []uuid.UUID) ([]GetUser
 const insertUser = `-- name: InsertUser :one
 INSERT INTO users (email, password_hash, name)
 VALUES ($1, $2, $3)
-RETURNING id, email, password_hash, name, photo_url, created_at
+RETURNING id, email, password_hash, name, photo_url, created_at, bio
 `
 
 type InsertUserParams struct {
@@ -105,21 +107,28 @@ func (q *Queries) InsertUser(ctx context.Context, arg InsertUserParams) (User, e
 		&i.Name,
 		&i.PhotoUrl,
 		&i.CreatedAt,
+		&i.Bio,
 	)
 	return i, err
 }
 
 const updateUserProfile = `-- name: UpdateUserProfile :exec
-UPDATE users SET name = $1, photo_url = $2 WHERE id = $3
+UPDATE users SET name = $1, photo_url = $2, bio = $3 WHERE id = $4
 `
 
 type UpdateUserProfileParams struct {
 	Name     string    `db:"name" json:"name"`
 	PhotoUrl *string   `db:"photo_url" json:"photo_url"`
+	Bio      *string   `db:"bio" json:"bio"`
 	ID       uuid.UUID `db:"id" json:"id"`
 }
 
 func (q *Queries) UpdateUserProfile(ctx context.Context, arg UpdateUserProfileParams) error {
-	_, err := q.db.Exec(ctx, updateUserProfile, arg.Name, arg.PhotoUrl, arg.ID)
+	_, err := q.db.Exec(ctx, updateUserProfile,
+		arg.Name,
+		arg.PhotoUrl,
+		arg.Bio,
+		arg.ID,
+	)
 	return err
 }

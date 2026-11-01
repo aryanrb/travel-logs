@@ -22,7 +22,7 @@ func (q *Queries) DeleteEntry(ctx context.Context, id uuid.UUID) error {
 }
 
 const getEntry = `-- name: GetEntry :one
-SELECT id, trip_id, title, description, entry_date, entry_time, location, created_by, last_modified_by, created_at, updated_at FROM timeline_entries WHERE id = $1
+SELECT id, trip_id, title, description, entry_date, entry_time, location, created_by, last_modified_by, created_at, updated_at, lat, lng FROM timeline_entries WHERE id = $1
 `
 
 func (q *Queries) GetEntry(ctx context.Context, id uuid.UUID) (TimelineEntry, error) {
@@ -40,17 +40,19 @@ func (q *Queries) GetEntry(ctx context.Context, id uuid.UUID) (TimelineEntry, er
 		&i.LastModifiedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Lat,
+		&i.Lng,
 	)
 	return i, err
 }
 
 const insertEntry = `-- name: InsertEntry :one
 INSERT INTO timeline_entries (
-    trip_id, title, description, entry_date, entry_time, location, created_by, last_modified_by
+    trip_id, title, description, entry_date, entry_time, location, lat, lng, created_by, last_modified_by
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $7
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $9
 )
-RETURNING id, trip_id, title, description, entry_date, entry_time, location, created_by, last_modified_by, created_at, updated_at
+RETURNING id, trip_id, title, description, entry_date, entry_time, location, created_by, last_modified_by, created_at, updated_at, lat, lng
 `
 
 type InsertEntryParams struct {
@@ -60,6 +62,8 @@ type InsertEntryParams struct {
 	EntryDate   time.Time `db:"entry_date" json:"entry_date"`
 	EntryTime   *string   `db:"entry_time" json:"entry_time"`
 	Location    *string   `db:"location" json:"location"`
+	Lat         *float64  `db:"lat" json:"lat"`
+	Lng         *float64  `db:"lng" json:"lng"`
 	CreatedBy   uuid.UUID `db:"created_by" json:"created_by"`
 }
 
@@ -71,6 +75,8 @@ func (q *Queries) InsertEntry(ctx context.Context, arg InsertEntryParams) (Timel
 		arg.EntryDate,
 		arg.EntryTime,
 		arg.Location,
+		arg.Lat,
+		arg.Lng,
 		arg.CreatedBy,
 	)
 	var i TimelineEntry
@@ -86,12 +92,14 @@ func (q *Queries) InsertEntry(ctx context.Context, arg InsertEntryParams) (Timel
 		&i.LastModifiedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Lat,
+		&i.Lng,
 	)
 	return i, err
 }
 
 const listEntries = `-- name: ListEntries :many
-SELECT id, trip_id, title, description, entry_date, entry_time, location, created_by, last_modified_by, created_at, updated_at FROM timeline_entries
+SELECT id, trip_id, title, description, entry_date, entry_time, location, created_by, last_modified_by, created_at, updated_at, lat, lng FROM timeline_entries
 WHERE trip_id = $1
 ORDER BY entry_date, entry_time NULLS FIRST, created_at
 `
@@ -117,6 +125,8 @@ func (q *Queries) ListEntries(ctx context.Context, tripID uuid.UUID) ([]Timeline
 			&i.LastModifiedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Lat,
+			&i.Lng,
 		); err != nil {
 			return nil, err
 		}
@@ -135,9 +145,11 @@ UPDATE timeline_entries SET
     entry_date = $3,
     entry_time = $4,
     location = $5,
-    last_modified_by = $6,
+    lat = $6,
+    lng = $7,
+    last_modified_by = $8,
     updated_at = now()
-WHERE id = $7
+WHERE id = $9
 `
 
 type UpdateEntryParams struct {
@@ -146,6 +158,8 @@ type UpdateEntryParams struct {
 	EntryDate      time.Time  `db:"entry_date" json:"entry_date"`
 	EntryTime      *string    `db:"entry_time" json:"entry_time"`
 	Location       *string    `db:"location" json:"location"`
+	Lat            *float64   `db:"lat" json:"lat"`
+	Lng            *float64   `db:"lng" json:"lng"`
 	LastModifiedBy *uuid.UUID `db:"last_modified_by" json:"last_modified_by"`
 	ID             uuid.UUID  `db:"id" json:"id"`
 }
@@ -157,6 +171,8 @@ func (q *Queries) UpdateEntry(ctx context.Context, arg UpdateEntryParams) error 
 		arg.EntryDate,
 		arg.EntryTime,
 		arg.Location,
+		arg.Lat,
+		arg.Lng,
 		arg.LastModifiedBy,
 		arg.ID,
 	)

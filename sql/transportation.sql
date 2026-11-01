@@ -1,10 +1,12 @@
 -- name: InsertTransport :one
 INSERT INTO transportation (
     trip_id, entry_id, expense_id, type, start_point, destination,
-    depart_at, distance_km, duration_min, cost_amount, notes, created_by
+    depart_at, distance_km, duration_min, cost_amount, notes, created_by,
+    start_lat, start_lng, destination_lat, destination_lng
 ) VALUES (
     @trip_id, @entry_id, @expense_id, @type, @start_point, @destination,
-    @depart_at, @distance_km, @duration_min, @cost_amount, @notes, @created_by
+    @depart_at, @distance_km, @duration_min, @cost_amount, @notes, @created_by,
+    @start_lat, @start_lng, @destination_lat, @destination_lng
 )
 RETURNING *;
 
@@ -25,7 +27,11 @@ UPDATE transportation SET
     distance_km = @distance_km,
     duration_min = @duration_min,
     cost_amount = @cost_amount,
-    notes = @notes
+    notes = @notes,
+    start_lat = @start_lat,
+    start_lng = @start_lng,
+    destination_lat = @destination_lat,
+    destination_lng = @destination_lng
 WHERE id = @id;
 
 -- name: DeleteTransport :exec

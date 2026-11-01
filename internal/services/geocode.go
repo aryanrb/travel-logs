@@ -17,7 +17,26 @@ import (
 	"travel-service/config"
 	db "travel-service/internal/database"
 	"travel-service/internal/models"
+	"travel-service/internal/utils/apperror"
 )
+
+// validateCoords checks a map-pin lat/lng pair: both or neither, within WGS84
+// ranges. A set pin always wins over a name lookup, so callers skip geocoding
+// when these are present.
+func validateCoords(lat, lng *float64) error {
+	if (lat == nil) != (lng == nil) {
+		return apperror.UnprocessableEntity("latitude and longitude must be provided together")
+	}
+	if lat != nil {
+		if *lat < -90 || *lat > 90 {
+			return apperror.UnprocessableEntity("latitude must be between -90 and 90")
+		}
+		if *lng < -180 || *lng > 180 {
+			return apperror.UnprocessableEntity("longitude must be between -180 and 180")
+		}
+	}
+	return nil
+}
 
 const nominatimURL = "https://nominatim.openstreetmap.org/search"
 

@@ -11,50 +11,101 @@ import (
 )
 
 type Querier interface {
+	AcceptFriendRequest(ctx context.Context, arg AcceptFriendRequestParams) error
 	AcceptInvite(ctx context.Context, arg AcceptInviteParams) (TripParticipant, error)
 	ArchiveTrip(ctx context.Context, id uuid.UUID) error
+	// ─── Blocks ───────────────────────────────────────────────────────────────────
+	Block(ctx context.Context, arg BlockParams) error
+	// Every user id blocked by @user_id or who blocks @user_id (either direction).
+	BlockedUserIDs(ctx context.Context, userID uuid.UUID) ([]uuid.UUID, error)
 	CategoryBreakdown(ctx context.Context, tripID uuid.UUID) ([]CategoryBreakdownRow, error)
+	ConfirmSettlement(ctx context.Context, id uuid.UUID) error
+	CountFollowers(ctx context.Context, userID uuid.UUID) (int32, error)
+	CountFollowing(ctx context.Context, userID uuid.UUID) (int32, error)
+	CountFriends(ctx context.Context, userID uuid.UUID) (int32, error)
+	CountGoing(ctx context.Context, tripID uuid.UUID) (int32, error)
+	CountLikes(ctx context.Context, tripID uuid.UUID) (int32, error)
+	CountPublicTripsByOwner(ctx context.Context, ownerID uuid.UUID) (int32, error)
+	CountSaves(ctx context.Context, tripID uuid.UUID) (int32, error)
 	CountTripPhotos(ctx context.Context, tripID uuid.UUID) (int64, error)
+	CountUnreadNotifications(ctx context.Context, userID uuid.UUID) (int32, error)
 	DeleteCategoryBudgets(ctx context.Context, tripID uuid.UUID) error
+	DeleteComment(ctx context.Context, id uuid.UUID) error
 	DeleteDestination(ctx context.Context, arg DeleteDestinationParams) error
 	DeleteEntry(ctx context.Context, id uuid.UUID) error
 	DeleteExpense(ctx context.Context, id uuid.UUID) error
+	DeleteFollowsBothWays(ctx context.Context, arg DeleteFollowsBothWaysParams) error
+	DeleteFriendshipPair(ctx context.Context, arg DeleteFriendshipPairParams) error
 	DeletePhoto(ctx context.Context, id uuid.UUID) error
+	DeletePool(ctx context.Context, tripID uuid.UUID) error
+	DeleteRSVP(ctx context.Context, id uuid.UUID) error
 	DeleteSettlement(ctx context.Context, id uuid.UUID) error
 	DeleteSharesForExpense(ctx context.Context, expenseID uuid.UUID) error
 	DeleteTransport(ctx context.Context, id uuid.UUID) error
 	DeleteTrip(ctx context.Context, id uuid.UUID) error
+	DidBlock(ctx context.Context, arg DidBlockParams) (bool, error)
+	EarliestWaitlisted(ctx context.Context, tripID uuid.UUID) (Rsvp, error)
+	// ─── Follows ──────────────────────────────────────────────────────────────────
+	Follow(ctx context.Context, arg FollowParams) error
+	FollowedIDs(ctx context.Context, followerID uuid.UUID) ([]uuid.UUID, error)
+	GetComment(ctx context.Context, id uuid.UUID) (Comment, error)
 	GetEntry(ctx context.Context, id uuid.UUID) (TimelineEntry, error)
 	GetExpense(ctx context.Context, id uuid.UUID) (Expense, error)
 	GetExternalPayer(ctx context.Context, id uuid.UUID) (ExternalPayer, error)
+	// ─── Friendships ──────────────────────────────────────────────────────────────
+	// The row between two users in either direction, if any.
+	GetFriendshipPair(ctx context.Context, arg GetFriendshipPairParams) (Friendship, error)
+	GetInviteLinkByToken(ctx context.Context, token string) (InviteLink, error)
+	GetInviteLinkByTrip(ctx context.Context, tripID uuid.UUID) (InviteLink, error)
 	GetParticipant(ctx context.Context, id uuid.UUID) (TripParticipant, error)
 	GetParticipantByToken(ctx context.Context, inviteToken *string) (TripParticipant, error)
 	GetParticipantByTripUser(ctx context.Context, arg GetParticipantByTripUserParams) (TripParticipant, error)
 	GetPhoto(ctx context.Context, id uuid.UUID) (Photo, error)
+	GetPool(ctx context.Context, tripID uuid.UUID) (TripPool, error)
 	// Returns the trip only if it is public — callers get NoRows (→ 404) otherwise,
 	// never revealing whether a private trip exists.
 	GetPublicTrip(ctx context.Context, id uuid.UUID) (GetPublicTripRow, error)
+	GetRSVP(ctx context.Context, id uuid.UUID) (Rsvp, error)
+	GetRSVPByTripUser(ctx context.Context, arg GetRSVPByTripUserParams) (Rsvp, error)
 	GetSettlement(ctx context.Context, id uuid.UUID) (Settlement, error)
 	GetTransport(ctx context.Context, id uuid.UUID) (Transportation, error)
 	GetTrip(ctx context.Context, id uuid.UUID) (Trip, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (User, error)
 	GetUsersByIDs(ctx context.Context, ids []uuid.UUID) ([]GetUsersByIDsRow, error)
+	GoingPeople(ctx context.Context, arg GoingPeopleParams) ([]GoingPeopleRow, error)
 	InsertCategoryBudget(ctx context.Context, arg InsertCategoryBudgetParams) error
+	InsertComment(ctx context.Context, arg InsertCommentParams) (Comment, error)
 	InsertDestination(ctx context.Context, arg InsertDestinationParams) (TripDestination, error)
 	InsertEntry(ctx context.Context, arg InsertEntryParams) (TimelineEntry, error)
 	InsertEvent(ctx context.Context, arg InsertEventParams) (TripEvent, error)
 	InsertExpense(ctx context.Context, arg InsertExpenseParams) (Expense, error)
+	InsertFriendRequest(ctx context.Context, arg InsertFriendRequestParams) error
+	InsertNotification(ctx context.Context, arg InsertNotificationParams) (Notification, error)
 	InsertParticipant(ctx context.Context, arg InsertParticipantParams) (TripParticipant, error)
 	InsertPhoto(ctx context.Context, arg InsertPhotoParams) (Photo, error)
+	// ─── Reports ──────────────────────────────────────────────────────────────────
+	InsertReport(ctx context.Context, arg InsertReportParams) (Report, error)
 	InsertSettlement(ctx context.Context, arg InsertSettlementParams) (Settlement, error)
 	// ─── Shares ───────────────────────────────────────────────────────────────
 	InsertShare(ctx context.Context, arg InsertShareParams) error
 	InsertTransport(ctx context.Context, arg InsertTransportParams) (Transportation, error)
 	InsertTrip(ctx context.Context, arg InsertTripParams) (Trip, error)
 	InsertUser(ctx context.Context, arg InsertUserParams) (User, error)
+	IsBlockedEitherWay(ctx context.Context, arg IsBlockedEitherWayParams) (bool, error)
+	IsFollowing(ctx context.Context, arg IsFollowingParams) (bool, error)
+	IsLiked(ctx context.Context, arg IsLikedParams) (bool, error)
+	IsSaved(ctx context.Context, arg IsSavedParams) (bool, error)
+	Like(ctx context.Context, arg LikeParams) error
+	LikedTripIDsFor(ctx context.Context, arg LikedTripIDsForParams) ([]uuid.UUID, error)
+	ListAcceptedFriends(ctx context.Context, userID uuid.UUID) ([]ListAcceptedFriendsRow, error)
+	ListBlocked(ctx context.Context, blockerID uuid.UUID) ([]ListBlockedRow, error)
 	ListCategoryBudgets(ctx context.Context, tripID uuid.UUID) ([]TripCategoryBudget, error)
 	ListCategoryBudgetsForTrips(ctx context.Context, tripIds []uuid.UUID) ([]TripCategoryBudget, error)
+	// replies cascade
+	// Oldest first (replies interleaved by created_at; the client groups by parent_id),
+	// keyset-paged on the optional `after` cursor. Comments by @blocked ids are hidden.
+	ListComments(ctx context.Context, arg ListCommentsParams) ([]ListCommentsRow, error)
 	ListDestinations(ctx context.Context, tripID uuid.UUID) ([]TripDestination, error)
 	ListEntries(ctx context.Context, tripID uuid.UUID) ([]TimelineEntry, error)
 	ListEntryPhotos(ctx context.Context, entryID *uuid.UUID) ([]Photo, error)
@@ -62,14 +113,26 @@ type Querier interface {
 	ListEvents(ctx context.Context, arg ListEventsParams) ([]TripEvent, error)
 	ListExpenses(ctx context.Context, tripID uuid.UUID) ([]Expense, error)
 	ListExternalPayers(ctx context.Context, tripID uuid.UUID) ([]ExternalPayer, error)
+	ListIncomingRequests(ctx context.Context, userID uuid.UUID) ([]ListIncomingRequestsRow, error)
+	// Newest first, keyset-paged on the optional `before` cursor.
+	ListNotifications(ctx context.Context, arg ListNotificationsParams) ([]ListNotificationsRow, error)
+	ListOutgoingRequests(ctx context.Context, userID uuid.UUID) ([]ListOutgoingRequestsRow, error)
 	ListOwnedTrips(ctx context.Context, ownerID uuid.UUID) ([]Trip, error)
 	ListParticipants(ctx context.Context, tripID uuid.UUID) ([]ListParticipantsRow, error)
 	// Owner is prepended in Go; this returns accepted collaborators only (no
 	// viewers, no external payers, no emails or ids).
 	ListPublicPeople(ctx context.Context, tripID uuid.UUID) ([]ListPublicPeopleRow, error)
-	// Public discovery. q matches title/description/start_location/destination names
-	// (case-insensitive); trip_type filters exactly. Empty string = no filter.
-	ListPublicTrips(ctx context.Context, arg ListPublicTripsParams) ([]ListPublicTripsRow, error)
+	// ─── Profile: owner's public trips (explore row shape) ────────────────────────
+	ListPublicTripsByOwner(ctx context.Context, ownerID uuid.UUID) ([]ListPublicTripsByOwnerRow, error)
+	// Public discovery with the aggregates the explore endpoint needs. q matches
+	// title/description/start_location/destination names (case-insensitive);
+	// trip_type filters exactly. Empty string = no filter. The remaining filters
+	// (days, destination, cost+currency conversion, following), sorting and paging
+	// happen in Go so currency conversion and cost filters stay correct.
+	// ponytail: returns the whole public set (frontend loads all today); add a SQL
+	// keyset page here if the public corpus ever gets large.
+	ListPublicTripsForExplore(ctx context.Context, arg ListPublicTripsForExploreParams) ([]ListPublicTripsForExploreRow, error)
+	ListRSVPs(ctx context.Context, tripID uuid.UUID) ([]ListRSVPsRow, error)
 	// Same row shape as ListPublicTrips, newest-saved first, public trips only.
 	ListSavedTrips(ctx context.Context, userID uuid.UUID) ([]ListSavedTripsRow, error)
 	ListSettlements(ctx context.Context, tripID uuid.UUID) ([]Settlement, error)
@@ -78,15 +141,31 @@ type Querier interface {
 	ListTransport(ctx context.Context, tripID uuid.UUID) ([]Transportation, error)
 	ListTripPhotos(ctx context.Context, tripID uuid.UUID) ([]Photo, error)
 	ListTripShares(ctx context.Context, tripID uuid.UUID) ([]ListTripSharesRow, error)
+	MarkAllNotificationsRead(ctx context.Context, userID uuid.UUID) error
+	MarkNotificationsRead(ctx context.Context, arg MarkNotificationsReadParams) error
+	// Sum of completed contributions into the pool.
+	PoolCollected(ctx context.Context, tripID uuid.UUID) (int64, error)
+	// Sum of expenses paid from the pool.
+	PoolSpent(ctx context.Context, tripID uuid.UUID) (int64, error)
 	PublicCategoryBreakdown(ctx context.Context, tripID uuid.UUID) ([]PublicCategoryBreakdownRow, error)
 	PublicTotalExpenses(ctx context.Context, tripID uuid.UUID) (int64, error)
+	RSVPCounts(ctx context.Context, tripID uuid.UUID) (RSVPCountsRow, error)
+	ResetInviteLinkToken(ctx context.Context, arg ResetInviteLinkTokenParams) (InviteLink, error)
+	// Revokes a user's access to a trip (RSVP changed away from Going / reply removed).
+	RevokeParticipantByUser(ctx context.Context, arg RevokeParticipantByUserParams) error
 	SaveTrip(ctx context.Context, arg SaveTripParams) error
+	SavedTripIDsFor(ctx context.Context, arg SavedTripIDsForParams) ([]uuid.UUID, error)
 	SetParticipantStatus(ctx context.Context, arg SetParticipantStatusParams) error
+	SetRSVPStatus(ctx context.Context, arg SetRSVPStatusParams) error
 	SetTripBudget(ctx context.Context, arg SetTripBudgetParams) error
 	SetTripPublic(ctx context.Context, arg SetTripPublicParams) error
 	TotalExpenses(ctx context.Context, tripID uuid.UUID) (int64, error)
 	TransportBreakdown(ctx context.Context, tripID uuid.UUID) ([]TransportBreakdownRow, error)
+	Unblock(ctx context.Context, arg UnblockParams) error
+	Unfollow(ctx context.Context, arg UnfollowParams) error
+	Unlike(ctx context.Context, arg UnlikeParams) error
 	UnsaveTrip(ctx context.Context, arg UnsaveTripParams) error
+	UpdateComment(ctx context.Context, arg UpdateCommentParams) (Comment, error)
 	UpdateDestinationCoords(ctx context.Context, arg UpdateDestinationCoordsParams) error
 	UpdateEntry(ctx context.Context, arg UpdateEntryParams) error
 	UpdateExpense(ctx context.Context, arg UpdateExpenseParams) error
@@ -97,6 +176,14 @@ type Querier interface {
 	UpdateUserProfile(ctx context.Context, arg UpdateUserProfileParams) error
 	// Reuses an existing payer record (same trip + name) to avoid duplicates (req 3.6).
 	UpsertExternalPayer(ctx context.Context, arg UpsertExternalPayerParams) (ExternalPayer, error)
+	// Creates the link, or updates settings on an existing one. token is set only on
+	// insert (keeps the current token on update; use ResetInviteLinkToken to rotate).
+	UpsertInviteLink(ctx context.Context, arg UpsertInviteLinkParams) (InviteLink, error)
+	UpsertPool(ctx context.Context, arg UpsertPoolParams) (TripPool, error)
+	UpsertRSVP(ctx context.Context, arg UpsertRSVPParams) (Rsvp, error)
+	// RSVP Going/Maybe grants accepted access with the given role, creating or
+	// reactivating the (trip, user) participant row.
+	UpsertRSVPParticipant(ctx context.Context, arg UpsertRSVPParticipantParams) error
 }
 
 var _ Querier = (*Queries)(nil)

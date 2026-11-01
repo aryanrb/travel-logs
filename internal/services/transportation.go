@@ -80,6 +80,12 @@ func (s *TransportService) Create(ctx context.Context, tripID, userID uuid.UUID,
 	if strings.TrimSpace(in.Type) == "" {
 		return nil, apperror.UnprocessableEntity("transportation type is required")
 	}
+	if err := validateCoords(in.StartLat, in.StartLng); err != nil {
+		return nil, err
+	}
+	if err := validateCoords(in.DestinationLat, in.DestinationLng); err != nil {
+		return nil, err
+	}
 	var created models.Transportation
 	err = inTx(ctx, s.db, s.q, userID, func(qtx *models.Queries) (*activity, error) {
 		expenseID, err := s.nestedExpenseID(ctx, qtx, tripID, userID, trip, in)
@@ -90,18 +96,22 @@ func (s *TransportService) Create(ctx context.Context, tripID, userID uuid.UUID,
 			return nil, err
 		}
 		t, err := qtx.InsertTransport(ctx, models.InsertTransportParams{
-			TripID:      tripID,
-			EntryID:     in.EntryID,
-			ExpenseID:   expenseID,
-			Type:        in.Type,
-			StartPoint:  in.StartPoint,
-			Destination: in.Destination,
-			DepartAt:    in.DepartAt,
-			DistanceKm:  in.DistanceKm,
-			DurationMin: in.DurationMin,
-			CostAmount:  in.CostAmount,
-			Notes:       in.Notes,
-			CreatedBy:   userID,
+			TripID:         tripID,
+			EntryID:        in.EntryID,
+			ExpenseID:      expenseID,
+			Type:           in.Type,
+			StartPoint:     in.StartPoint,
+			Destination:    in.Destination,
+			DepartAt:       in.DepartAt,
+			DistanceKm:     in.DistanceKm,
+			DurationMin:    in.DurationMin,
+			CostAmount:     in.CostAmount,
+			Notes:          in.Notes,
+			CreatedBy:      userID,
+			StartLat:       in.StartLat,
+			StartLng:       in.StartLng,
+			DestinationLat: in.DestinationLat,
+			DestinationLng: in.DestinationLng,
 		})
 		if err != nil {
 			return nil, apperror.FromDB(err)
@@ -156,6 +166,12 @@ func (s *TransportService) Update(ctx context.Context, tripID, id, userID uuid.U
 	if strings.TrimSpace(in.Type) == "" {
 		return apperror.UnprocessableEntity("transportation type is required")
 	}
+	if err := validateCoords(in.StartLat, in.StartLng); err != nil {
+		return err
+	}
+	if err := validateCoords(in.DestinationLat, in.DestinationLng); err != nil {
+		return err
+	}
 	return inTx(ctx, s.db, s.q, userID, func(qtx *models.Queries) (*activity, error) {
 		expenseID, err := s.nestedExpenseID(ctx, qtx, tripID, userID, trip, in)
 		if err != nil {
@@ -165,17 +181,21 @@ func (s *TransportService) Update(ctx context.Context, tripID, id, userID uuid.U
 			return nil, err
 		}
 		if err := qtx.UpdateTransport(ctx, models.UpdateTransportParams{
-			EntryID:     in.EntryID,
-			ExpenseID:   expenseID,
-			Type:        in.Type,
-			StartPoint:  in.StartPoint,
-			Destination: in.Destination,
-			DepartAt:    in.DepartAt,
-			DistanceKm:  in.DistanceKm,
-			DurationMin: in.DurationMin,
-			CostAmount:  in.CostAmount,
-			Notes:       in.Notes,
-			ID:          id,
+			EntryID:        in.EntryID,
+			ExpenseID:      expenseID,
+			Type:           in.Type,
+			StartPoint:     in.StartPoint,
+			Destination:    in.Destination,
+			DepartAt:       in.DepartAt,
+			DistanceKm:     in.DistanceKm,
+			DurationMin:    in.DurationMin,
+			CostAmount:     in.CostAmount,
+			Notes:          in.Notes,
+			StartLat:       in.StartLat,
+			StartLng:       in.StartLng,
+			DestinationLat: in.DestinationLat,
+			DestinationLng: in.DestinationLng,
+			ID:             id,
 		}); err != nil {
 			return nil, apperror.FromDB(err)
 		}

@@ -64,6 +64,9 @@ func (s *TimelineService) CreateEntry(ctx context.Context, tripID, userID uuid.U
 	if in.EntryDate.Time().IsZero() {
 		return nil, apperror.UnprocessableEntity("entry_date is required (YYYY-MM-DD)")
 	}
+	if err := validateCoords(in.Lat, in.Lng); err != nil {
+		return nil, err
+	}
 
 	var created models.TimelineEntry
 	err = inTx(ctx, s.db, s.q, userID, func(qtx *models.Queries) (*activity, error) {
@@ -74,6 +77,8 @@ func (s *TimelineService) CreateEntry(ctx context.Context, tripID, userID uuid.U
 			EntryDate:   in.EntryDate.Time(),
 			EntryTime:   in.EntryTime,
 			Location:    in.Location,
+			Lat:         in.Lat,
+			Lng:         in.Lng,
 			CreatedBy:   userID,
 		})
 		if err != nil {
@@ -123,6 +128,9 @@ func (s *TimelineService) UpdateEntry(ctx context.Context, tripID, entryID, user
 	if in.EntryDate.Time().IsZero() {
 		return apperror.UnprocessableEntity("entry_date is required (YYYY-MM-DD)")
 	}
+	if err := validateCoords(in.Lat, in.Lng); err != nil {
+		return err
+	}
 	uid := userID
 	params := models.UpdateEntryParams{
 		Title:          in.Title,
@@ -130,6 +138,8 @@ func (s *TimelineService) UpdateEntry(ctx context.Context, tripID, entryID, user
 		EntryDate:      in.EntryDate.Time(),
 		EntryTime:      in.EntryTime,
 		Location:       in.Location,
+		Lat:            in.Lat,
+		Lng:            in.Lng,
 		LastModifiedBy: &uid,
 		ID:             entryID,
 	}

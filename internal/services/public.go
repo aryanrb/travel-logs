@@ -2,7 +2,10 @@ package services
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -17,8 +20,10 @@ import (
 	"travel-service/internal/utils/apperror"
 )
 
-// publicTripLimit caps discovery results.
-const publicTripLimit = 50
+const (
+	defaultExploreLimit = 20
+	maxExploreLimit     = 100
+)
 
 type PublicService struct {
 	q   *models.Queries
@@ -35,6 +40,7 @@ func NewPublicService() *PublicService {
 func toPublicTripSafe(t models.Trip) types.PublicTripSafe {
 	return types.PublicTripSafe{
 		ID:            t.ID,
+		OwnerID:       t.OwnerID,
 		Title:         t.Title,
 		Description:   t.Description,
 		CoverImage:    t.CoverImage,
@@ -53,15 +59,19 @@ func toPublicTripSafe(t models.Trip) types.PublicTripSafe {
 // expense_id link is never exposed.
 func toPublicTransport(t models.Transportation, showCosts bool) types.PublicTransport {
 	pt := types.PublicTransport{
-		ID:          t.ID,
-		Type:        t.Type,
-		StartPoint:  t.StartPoint,
-		Destination: t.Destination,
-		DepartAt:    t.DepartAt,
-		DistanceKm:  t.DistanceKm,
-		DurationMin: t.DurationMin,
-		Notes:       t.Notes,
-		EntryID:     t.EntryID,
+		ID:             t.ID,
+		Type:           t.Type,
+		StartPoint:     t.StartPoint,
+		Destination:    t.Destination,
+		DepartAt:       t.DepartAt,
+		DistanceKm:     t.DistanceKm,
+		DurationMin:    t.DurationMin,
+		Notes:          t.Notes,
+		EntryID:        t.EntryID,
+		StartLat:       t.StartLat,
+		StartLng:       t.StartLng,
+		DestinationLat: t.DestinationLat,
+		DestinationLng: t.DestinationLng,
 	}
 	if showCosts {
 		pt.CostAmount = t.CostAmount
@@ -93,27 +103,305 @@ func shiftPtr(t *time.Time, d time.Duration) *time.Time {
 
 // ─── Endpoints ───────────────────────────────────────────────────────────────
 
-func (s *PublicService) ListTrips(ctx context.Context, q, tripType string) (*types.PublicTripListResponse, error) {
-	rows, err := s.q.ListPublicTrips(ctx, models.ListPublicTripsParams{
-		Q:        strings.TrimSpace(q),
-		TripType: strings.TrimSpace(tripType),
-		Lim:      publicTripLimit,
+// ListTrips powers explore. The SQL returns all public trips (filtered by q and
+// trip_type) with aggregates; the rest — days, destination, cost+currency,
+// following, sorting and paging — happens here so conversion and cost filters
+// stay correct across pages.
+func (s *PublicService) ListTrips(ctx context.Context, p types.ExploreParams, viewerID *uuid.UUID) (*types.PublicTripListResponse, error) {
+	rows, err := s.q.ListPublicTripsForExplore(ctx, models.ListPublicTripsForExploreParams{
+		Q:        strings.TrimSpace(p.Q),
+		TripType: strings.TrimSpace(p.TripType),
 	})
 	if err != nil {
 		return nil, apperror.FromDB(err)
 	}
-	items := make([]types.PublicTripListItem, len(rows))
-	for i, r := range rows {
-		items[i] = types.PublicTripListItem{
-			Trip:         toPublicTripSafe(r.Trip),
-			Destinations: r.DestinationNames,
-			OwnerName:    r.OwnerName,
+
+	costFilter := p.MinCostPerPerson != nil || p.MaxCostPerPerson != nil
+
+	var followed, blocked map[uuid.UUID]bool
+	if viewerID != nil {
+		b, err := blockedSet(ctx, s.q, *viewerID)
+		if err != nil {
+			return nil, apperror.FromDB(err)
+		}
+		blocked = b
+		if p.Following {
+			ids, err := followedOwnerIDs(ctx, s.q, *viewerID)
+			if err != nil {
+				return nil, apperror.FromDB(err)
+			}
+			followed = make(map[uuid.UUID]bool, len(ids))
+			for _, id := range ids {
+				followed[id] = true
+			}
 		}
 	}
-	return &types.PublicTripListResponse{Trips: items}, nil
+
+	items := make([]types.PublicTripListItem, 0, len(rows))
+	for _, r := range rows {
+		t := r.Trip
+		if blocked[t.OwnerID] {
+			continue // hide trips by blocked people (either direction)
+		}
+		if p.Following && viewerID != nil && !followed[t.OwnerID] {
+			continue
+		}
+		if p.MinDays != nil || p.MaxDays != nil {
+			days, ok := modelTripDays(t)
+			if !ok {
+				continue // without both dates, excluded when a day filter is set
+			}
+			if p.MinDays != nil && days < *p.MinDays {
+				continue
+			}
+			if p.MaxDays != nil && days > *p.MaxDays {
+				continue
+			}
+		}
+		if p.Destination != "" && !matchesDestination(t, r.DestinationNames, p.Destination) {
+			continue
+		}
+
+		cpp := costPerPerson(t.ShowCostsPublic, r.TotalSpent, r.Travellers)
+
+		if costFilter {
+			if !t.ShowCostsPublic {
+				continue // private costs excluded whenever a cost filter is set
+			}
+			cmp := *cpp
+			if p.Currency != "" && !strings.EqualFold(p.Currency, t.Currency) {
+				conv, ok := rates.convert(*cpp, t.Currency, p.Currency)
+				if !ok {
+					continue // can't convert → can't verify the filter → exclude
+				}
+				cmp = conv
+			}
+			if p.MinCostPerPerson != nil && cmp < *p.MinCostPerPerson {
+				continue
+			}
+			if p.MaxCostPerPerson != nil && cmp > *p.MaxCostPerPerson {
+				continue
+			}
+		}
+
+		item := types.PublicTripListItem{
+			Trip:          toPublicTripSafe(t),
+			Destinations:  r.DestinationNames,
+			OwnerName:     r.OwnerName,
+			CostPerPerson: cpp,
+			Likes:         int64(r.LikesCount),
+			Saves:         int64(r.SavesCount),
+		}
+		if cpp != nil && p.Currency != "" && !strings.EqualFold(p.Currency, t.Currency) {
+			if conv, ok := rates.convert(*cpp, t.Currency, p.Currency); ok {
+				item.CostPerPersonConverted = &types.ConvertedCost{Amount: conv, Currency: strings.ToUpper(p.Currency)}
+			}
+		}
+		items = append(items, item)
+	}
+
+	if err := decorateViewerFlags(ctx, s.q, items, viewerID); err != nil {
+		return nil, err
+	}
+	sortExplore(items, p.Sort)
+	return pageItems(items, p.Cursor, p.Limit), nil
 }
 
-func (s *PublicService) GetTrip(ctx context.Context, tripID uuid.UUID) (*types.PublicTripDetail, error) {
+// decorateViewerFlags sets liked_by_me/saved_by_me for a signed-in viewer across
+// the given items in two queries (no-op when signed out).
+func decorateViewerFlags(ctx context.Context, q *models.Queries, items []types.PublicTripListItem, viewerID *uuid.UUID) error {
+	if viewerID == nil || len(items) == 0 {
+		return nil
+	}
+	ids := make([]uuid.UUID, len(items))
+	for i := range items {
+		ids[i] = items[i].Trip.ID
+	}
+	liked, err := q.LikedTripIDsFor(ctx, models.LikedTripIDsForParams{UserID: *viewerID, TripIds: ids})
+	if err != nil {
+		return apperror.FromDB(err)
+	}
+	saved, err := q.SavedTripIDsFor(ctx, models.SavedTripIDsForParams{UserID: *viewerID, TripIds: ids})
+	if err != nil {
+		return apperror.FromDB(err)
+	}
+	likedSet := make(map[uuid.UUID]bool, len(liked))
+	for _, id := range liked {
+		likedSet[id] = true
+	}
+	savedSet := make(map[uuid.UUID]bool, len(saved))
+	for _, id := range saved {
+		savedSet[id] = true
+	}
+	for i := range items {
+		items[i].LikedByMe = likedSet[items[i].Trip.ID]
+		items[i].SavedByMe = savedSet[items[i].Trip.ID]
+	}
+	return nil
+}
+
+// Like/Unlike toggle a like on a public trip (idempotent). Liking notifies the
+// owner once per person (not for your own trip).
+func (s *PublicService) Like(ctx context.Context, tripID, userID uuid.UUID) error {
+	trip, err := s.q.GetPublicTrip(ctx, tripID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return apperror.NotFound("trip not found")
+		}
+		return apperror.FromDB(err)
+	}
+	already, _ := s.q.IsLiked(ctx, models.IsLikedParams{UserID: userID, TripID: tripID})
+	if err := s.q.Like(ctx, models.LikeParams{UserID: userID, TripID: tripID}); err != nil {
+		return apperror.FromDB(err)
+	}
+	if !already {
+		notify(ctx, s.q, notifyParams{UserID: trip.Trip.OwnerID, Type: "like", ActorID: &userID, TripID: &tripID})
+	}
+	return nil
+}
+
+func (s *PublicService) Unlike(ctx context.Context, tripID, userID uuid.UUID) error {
+	if err := s.ensurePublic(ctx, tripID); err != nil {
+		return err
+	}
+	return apperror.FromDBOrNil(s.q.Unlike(ctx, models.UnlikeParams{UserID: userID, TripID: tripID}))
+}
+
+// costPerPerson is total spent ÷ travellers (travellers ≥ 1), or nil when the
+// owner keeps costs private.
+func costPerPerson(showCosts bool, total int64, travellers int32) *int64 {
+	if !showCosts {
+		return nil
+	}
+	denom := int64(travellers)
+	if denom < 1 {
+		denom = 1
+	}
+	v := total / denom
+	return &v
+}
+
+// modelTripDays is the inclusive day count (start and end both counted): 12–15
+// Nov = 4 days. ok=false when either date is missing.
+func modelTripDays(t models.Trip) (int, bool) {
+	if t.StartDate == nil || t.EndDate == nil {
+		return 0, false
+	}
+	return int(t.EndDate.Sub(*t.StartDate).Hours()/24) + 1, true
+}
+
+func matchesDestination(t models.Trip, dests []string, needle string) bool {
+	n := strings.ToLower(strings.TrimSpace(needle))
+	if t.StartLocation != nil && strings.Contains(strings.ToLower(*t.StartLocation), n) {
+		return true
+	}
+	for _, d := range dests {
+		if strings.Contains(strings.ToLower(d), n) {
+			return true
+		}
+	}
+	return false
+}
+
+// itemDays mirrors modelTripDays for sorting, off the public item.
+func itemDays(it types.PublicTripListItem) (int, bool) {
+	sd, ed := it.Trip.StartDate, it.Trip.EndDate
+	if sd == nil || ed == nil {
+		return 0, false
+	}
+	return int(ed.Time().Sub(sd.Time()).Hours()/24) + 1, true
+}
+
+// sortExplore orders items in place. "" keeps the SQL order (created_at desc).
+// Trips missing the dates a sort needs go last; ties break by id for stability.
+func sortExplore(items []types.PublicTripListItem, mode string) {
+	less := func(i, j int) bool { return false }
+	switch mode {
+	case "shortest", "longest":
+		less = func(i, j int) bool {
+			di, oi := itemDays(items[i])
+			dj, oj := itemDays(items[j])
+			if oi != oj {
+				return oi // trips with dates first
+			}
+			if oi && di != dj {
+				if mode == "shortest" {
+					return di < dj
+				}
+				return di > dj
+			}
+			return items[i].Trip.ID.String() < items[j].Trip.ID.String()
+		}
+	case "soonest":
+		less = func(i, j int) bool {
+			si, sj := items[i].Trip.StartDate, items[j].Trip.StartDate
+			if (si == nil) != (sj == nil) {
+				return si != nil // trips with a start date first
+			}
+			if si != nil && !si.Time().Equal(sj.Time()) {
+				return si.Time().Before(sj.Time())
+			}
+			return items[i].Trip.ID.String() < items[j].Trip.ID.String()
+		}
+	case "popular":
+		less = func(i, j int) bool {
+			if items[i].Likes != items[j].Likes {
+				return items[i].Likes > items[j].Likes
+			}
+			if items[i].Saves != items[j].Saves {
+				return items[i].Saves > items[j].Saves
+			}
+			return items[i].Trip.ID.String() < items[j].Trip.ID.String()
+		}
+	default:
+		return
+	}
+	sort.SliceStable(items, less)
+}
+
+// pageItems applies the opaque offset cursor + limit and sets next_cursor.
+func pageItems(items []types.PublicTripListItem, cursor string, limit int) *types.PublicTripListResponse {
+	if limit <= 0 {
+		limit = defaultExploreLimit
+	}
+	if limit > maxExploreLimit {
+		limit = maxExploreLimit
+	}
+	start := decodeCursor(cursor)
+	if start > len(items) {
+		start = len(items)
+	}
+	end := start + limit
+	var next *string
+	if end < len(items) {
+		c := encodeCursor(end)
+		next = &c
+	} else {
+		end = len(items)
+	}
+	return &types.PublicTripListResponse{Trips: items[start:end], NextCursor: next}
+}
+
+func encodeCursor(n int) string {
+	return base64.RawURLEncoding.EncodeToString([]byte(strconv.Itoa(n)))
+}
+
+func decodeCursor(s string) int {
+	if s == "" {
+		return 0
+	}
+	b, err := base64.RawURLEncoding.DecodeString(s)
+	if err != nil {
+		return 0
+	}
+	n, err := strconv.Atoi(string(b))
+	if err != nil || n < 0 {
+		return 0
+	}
+	return n
+}
+
+func (s *PublicService) GetTrip(ctx context.Context, tripID uuid.UUID, viewerID *uuid.UUID) (*types.PublicTripDetail, error) {
 	row, err := s.q.GetPublicTrip(ctx, tripID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -122,6 +410,11 @@ func (s *PublicService) GetTrip(ctx context.Context, tripID uuid.UUID) (*types.P
 		return nil, apperror.FromDB(err)
 	}
 	trip := row.Trip
+	if viewerID != nil {
+		if blocked, _ := isBlockedBetween(ctx, s.q, *viewerID, trip.OwnerID); blocked {
+			return nil, apperror.NotFound("trip not found")
+		}
+	}
 
 	rawDests, err := s.q.ListDestinations(ctx, tripID)
 	if err != nil {
@@ -153,6 +446,7 @@ func (s *PublicService) GetTrip(ctx context.Context, tripID uuid.UUID) (*types.P
 		entries[i] = types.PublicEntry{
 			ID: e.ID, Title: e.Title, Description: e.Description,
 			EntryDate: types.Date(e.EntryDate), EntryTime: e.EntryTime, Location: e.Location,
+			Lat: e.Lat, Lng: e.Lng,
 		}
 	}
 
@@ -186,6 +480,14 @@ func (s *PublicService) GetTrip(ctx context.Context, tripID uuid.UUID) (*types.P
 	}
 	budget := buildPublicBudget(trip.ShowCostsPublic, trip.Currency, total, travellers, cats, trip.BudgetAmount)
 
+	likes, _ := s.q.CountLikes(ctx, tripID)
+	saves, _ := s.q.CountSaves(ctx, tripID)
+	var likedByMe, savedByMe bool
+	if viewerID != nil {
+		likedByMe, _ = s.q.IsLiked(ctx, models.IsLikedParams{UserID: *viewerID, TripID: tripID})
+		savedByMe, _ = s.q.IsSaved(ctx, models.IsSavedParams{UserID: *viewerID, TripID: tripID})
+	}
+
 	return &types.PublicTripDetail{
 		Trip:           toPublicTripSafe(trip),
 		Destinations:   dests,
@@ -194,6 +496,10 @@ func (s *PublicService) GetTrip(ctx context.Context, tripID uuid.UUID) (*types.P
 		Transportation: trans,
 		Photos:         photos,
 		Budget:         budget,
+		Likes:          int64(likes),
+		LikedByMe:      likedByMe,
+		Saves:          int64(saves),
+		SavedByMe:      savedByMe,
 	}, nil
 }
 
@@ -254,6 +560,8 @@ func (s *PublicService) Copy(ctx context.Context, sourceID, callerID uuid.UUID, 
 		StartLocation: source.StartLocation,
 		TripType:      source.TripType,
 		Currency:      source.Currency,
+		StartLat:      source.StartLat,
+		StartLng:      source.StartLng,
 	})
 	if err != nil {
 		return nil, apperror.FromDB(err)
@@ -262,6 +570,7 @@ func (s *PublicService) Copy(ctx context.Context, sourceID, callerID uuid.UUID, 
 	for _, d := range dests {
 		if _, err := qtx.InsertDestination(ctx, models.InsertDestinationParams{
 			TripID: trip.ID, Name: d.Name, ArrivalDate: shiftPtr(d.ArrivalDate, delta), SortOrder: d.SortOrder,
+			Lat: d.Lat, Lng: d.Lng,
 		}); err != nil {
 			return nil, apperror.FromDB(err)
 		}
@@ -273,6 +582,7 @@ func (s *PublicService) Copy(ctx context.Context, sourceID, callerID uuid.UUID, 
 		ne, err := qtx.InsertEntry(ctx, models.InsertEntryParams{
 			TripID: trip.ID, Title: e.Title, Description: e.Description,
 			EntryDate: shiftTime(e.EntryDate, delta), EntryTime: e.EntryTime, Location: e.Location,
+			Lat: e.Lat, Lng: e.Lng,
 			CreatedBy: callerID,
 		})
 		if err != nil {
@@ -289,18 +599,22 @@ func (s *PublicService) Copy(ctx context.Context, sourceID, callerID uuid.UUID, 
 			}
 		}
 		if _, err := qtx.InsertTransport(ctx, models.InsertTransportParams{
-			TripID:      trip.ID,
-			EntryID:     entryID,
-			ExpenseID:   nil, // never copy the expense link
-			Type:        j.Type,
-			StartPoint:  j.StartPoint,
-			Destination: j.Destination,
-			DepartAt:    shiftPtr(j.DepartAt, delta),
-			DistanceKm:  j.DistanceKm,
-			DurationMin: j.DurationMin,
-			CostAmount:  nil, // never copy cost
-			Notes:       j.Notes,
-			CreatedBy:   callerID,
+			TripID:         trip.ID,
+			EntryID:        entryID,
+			ExpenseID:      nil, // never copy the expense link
+			Type:           j.Type,
+			StartPoint:     j.StartPoint,
+			Destination:    j.Destination,
+			DepartAt:       shiftPtr(j.DepartAt, delta),
+			DistanceKm:     j.DistanceKm,
+			DurationMin:    j.DurationMin,
+			CostAmount:     nil, // never copy cost
+			Notes:          j.Notes,
+			CreatedBy:      callerID,
+			StartLat:       j.StartLat,
+			StartLng:       j.StartLng,
+			DestinationLat: j.DestinationLat,
+			DestinationLng: j.DestinationLng,
 		}); err != nil {
 			return nil, apperror.FromDB(err)
 		}

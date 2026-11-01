@@ -63,7 +63,7 @@ func (q *Queries) DeleteSharesForExpense(ctx context.Context, expenseID uuid.UUI
 }
 
 const getExpense = `-- name: GetExpense :one
-SELECT id, trip_id, title, amount, currency, category, expense_date, paid_by_user_id, paid_by_external_id, recorded_by, split_method, notes, receipt_url, created_at, updated_at, hide_from_public, entry_id, original_currency, original_amount, exchange_rate FROM expenses WHERE id = $1
+SELECT id, trip_id, title, amount, currency, category, expense_date, paid_by_user_id, paid_by_external_id, recorded_by, split_method, notes, receipt_url, created_at, updated_at, hide_from_public, entry_id, original_currency, original_amount, exchange_rate, from_pool FROM expenses WHERE id = $1
 `
 
 func (q *Queries) GetExpense(ctx context.Context, id uuid.UUID) (Expense, error) {
@@ -90,6 +90,7 @@ func (q *Queries) GetExpense(ctx context.Context, id uuid.UUID) (Expense, error)
 		&i.OriginalCurrency,
 		&i.OriginalAmount,
 		&i.ExchangeRate,
+		&i.FromPool,
 	)
 	return i, err
 }
@@ -98,13 +99,13 @@ const insertExpense = `-- name: InsertExpense :one
 INSERT INTO expenses (
     trip_id, title, amount, currency, category, expense_date,
     paid_by_user_id, paid_by_external_id, recorded_by, split_method, notes, receipt_url, hide_from_public, entry_id,
-    original_currency, original_amount, exchange_rate
+    original_currency, original_amount, exchange_rate, from_pool
 ) VALUES (
     $1, $2, $3, $4, $5, $6,
     $7, $8, $9, $10, $11, $12, $13, $14,
-    $15, $16, $17
+    $15, $16, $17, $18
 )
-RETURNING id, trip_id, title, amount, currency, category, expense_date, paid_by_user_id, paid_by_external_id, recorded_by, split_method, notes, receipt_url, created_at, updated_at, hide_from_public, entry_id, original_currency, original_amount, exchange_rate
+RETURNING id, trip_id, title, amount, currency, category, expense_date, paid_by_user_id, paid_by_external_id, recorded_by, split_method, notes, receipt_url, created_at, updated_at, hide_from_public, entry_id, original_currency, original_amount, exchange_rate, from_pool
 `
 
 type InsertExpenseParams struct {
@@ -125,6 +126,7 @@ type InsertExpenseParams struct {
 	OriginalCurrency *string    `db:"original_currency" json:"original_currency"`
 	OriginalAmount   *int64     `db:"original_amount" json:"original_amount"`
 	ExchangeRate     *float64   `db:"exchange_rate" json:"exchange_rate"`
+	FromPool         bool       `db:"from_pool" json:"from_pool"`
 }
 
 func (q *Queries) InsertExpense(ctx context.Context, arg InsertExpenseParams) (Expense, error) {
@@ -146,6 +148,7 @@ func (q *Queries) InsertExpense(ctx context.Context, arg InsertExpenseParams) (E
 		arg.OriginalCurrency,
 		arg.OriginalAmount,
 		arg.ExchangeRate,
+		arg.FromPool,
 	)
 	var i Expense
 	err := row.Scan(
@@ -169,6 +172,7 @@ func (q *Queries) InsertExpense(ctx context.Context, arg InsertExpenseParams) (E
 		&i.OriginalCurrency,
 		&i.OriginalAmount,
 		&i.ExchangeRate,
+		&i.FromPool,
 	)
 	return i, err
 }
@@ -197,7 +201,7 @@ func (q *Queries) InsertShare(ctx context.Context, arg InsertShareParams) error 
 }
 
 const listExpenses = `-- name: ListExpenses :many
-SELECT id, trip_id, title, amount, currency, category, expense_date, paid_by_user_id, paid_by_external_id, recorded_by, split_method, notes, receipt_url, created_at, updated_at, hide_from_public, entry_id, original_currency, original_amount, exchange_rate FROM expenses WHERE trip_id = $1 ORDER BY expense_date DESC, created_at DESC
+SELECT id, trip_id, title, amount, currency, category, expense_date, paid_by_user_id, paid_by_external_id, recorded_by, split_method, notes, receipt_url, created_at, updated_at, hide_from_public, entry_id, original_currency, original_amount, exchange_rate, from_pool FROM expenses WHERE trip_id = $1 ORDER BY expense_date DESC, created_at DESC
 `
 
 func (q *Queries) ListExpenses(ctx context.Context, tripID uuid.UUID) ([]Expense, error) {
@@ -230,6 +234,7 @@ func (q *Queries) ListExpenses(ctx context.Context, tripID uuid.UUID) ([]Expense
 			&i.OriginalCurrency,
 			&i.OriginalAmount,
 			&i.ExchangeRate,
+			&i.FromPool,
 		); err != nil {
 			return nil, err
 		}
@@ -332,8 +337,9 @@ UPDATE expenses SET
     original_currency = $13,
     original_amount = $14,
     exchange_rate = $15,
+    from_pool = $16,
     updated_at = now()
-WHERE id = $16
+WHERE id = $17
 `
 
 type UpdateExpenseParams struct {
@@ -352,6 +358,7 @@ type UpdateExpenseParams struct {
 	OriginalCurrency *string    `db:"original_currency" json:"original_currency"`
 	OriginalAmount   *int64     `db:"original_amount" json:"original_amount"`
 	ExchangeRate     *float64   `db:"exchange_rate" json:"exchange_rate"`
+	FromPool         bool       `db:"from_pool" json:"from_pool"`
 	ID               uuid.UUID  `db:"id" json:"id"`
 }
 
@@ -372,6 +379,7 @@ func (q *Queries) UpdateExpense(ctx context.Context, arg UpdateExpenseParams) er
 		arg.OriginalCurrency,
 		arg.OriginalAmount,
 		arg.ExchangeRate,
+		arg.FromPool,
 		arg.ID,
 	)
 	return err

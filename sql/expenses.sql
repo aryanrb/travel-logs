@@ -2,11 +2,11 @@
 INSERT INTO expenses (
     trip_id, title, amount, currency, category, expense_date,
     paid_by_user_id, paid_by_external_id, recorded_by, split_method, notes, receipt_url, hide_from_public, entry_id,
-    original_currency, original_amount, exchange_rate
+    original_currency, original_amount, exchange_rate, from_pool
 ) VALUES (
     @trip_id, @title, @amount, @currency, @category, @expense_date,
     @paid_by_user_id, @paid_by_external_id, @recorded_by, @split_method, @notes, @receipt_url, @hide_from_public, @entry_id,
-    @original_currency, @original_amount, @exchange_rate
+    @original_currency, @original_amount, @exchange_rate, @from_pool
 )
 RETURNING *;
 
@@ -33,6 +33,7 @@ UPDATE expenses SET
     original_currency = @original_currency,
     original_amount = @original_amount,
     exchange_rate = @exchange_rate,
+    from_pool = @from_pool,
     updated_at = now()
 WHERE id = @id;
 

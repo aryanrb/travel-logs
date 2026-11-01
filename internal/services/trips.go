@@ -66,18 +66,27 @@ func (s *TripService) Create(ctx context.Context, userID uuid.UUID, in types.Tri
 	if strings.TrimSpace(in.Title) == "" {
 		return nil, apperror.UnprocessableEntity("trip title is required")
 	}
+	if err := validateCoords(in.StartLat, in.StartLng); err != nil {
+		return nil, err
+	}
+	cover, err := normalizeHTTPSURL(in.CoverImage)
+	if err != nil {
+		return nil, err
+	}
 	var trip models.Trip
-	err := inTx(ctx, s.db, s.q, userID, func(qtx *models.Queries) (*activity, error) {
+	err = inTx(ctx, s.db, s.q, userID, func(qtx *models.Queries) (*activity, error) {
 		t, err := qtx.InsertTrip(ctx, models.InsertTripParams{
 			OwnerID:       userID,
 			Title:         in.Title,
-			CoverImage:    in.CoverImage,
+			CoverImage:    cover,
 			Description:   in.Description,
 			StartDate:     types.DatePtr(in.StartDate),
 			EndDate:       types.DatePtr(in.EndDate),
 			StartLocation: in.StartLocation,
 			TripType:      in.TripType,
 			Currency:      currencyOr(in.Currency),
+			StartLat:      in.StartLat,
+			StartLng:      in.StartLng,
 		})
 		if err != nil {
 			return nil, apperror.FromDB(err)
@@ -89,7 +98,8 @@ func (s *TripService) Create(ctx context.Context, userID uuid.UUID, in types.Tri
 	if err != nil {
 		return nil, err
 	}
-	if trip.StartLocation != nil {
+	// A pin wins over a name lookup: only geocode when no pin was set.
+	if in.StartLat == nil && trip.StartLocation != nil {
 		go geocodeTripStart(trip.ID, *trip.StartLocation)
 	}
 	return s.tripResponse(ctx, trip)
@@ -202,10 +212,17 @@ func (s *TripService) Update(ctx context.Context, tripID, userID uuid.UUID, in t
 	if strings.TrimSpace(in.Title) == "" {
 		return nil, apperror.UnprocessableEntity("trip title is required")
 	}
-	err := inTx(ctx, s.db, s.q, userID, func(qtx *models.Queries) (*activity, error) {
+	if err := validateCoords(in.StartLat, in.StartLng); err != nil {
+		return nil, err
+	}
+	cover, err := normalizeHTTPSURL(in.CoverImage)
+	if err != nil {
+		return nil, err
+	}
+	err = inTx(ctx, s.db, s.q, userID, func(qtx *models.Queries) (*activity, error) {
 		if err := qtx.UpdateTrip(ctx, models.UpdateTripParams{
 			Title:         in.Title,
-			CoverImage:    in.CoverImage,
+			CoverImage:    cover,
 			Description:   in.Description,
 			StartDate:     types.DatePtr(in.StartDate),
 			EndDate:       types.DatePtr(in.EndDate),
@@ -222,7 +239,15 @@ func (s *TripService) Update(ctx context.Context, tripID, userID uuid.UUID, in t
 	if err != nil {
 		return nil, err
 	}
-	if in.StartLocation != nil {
+	// A pin wins: persist it and skip the lookup. Without a pin, geocode by name
+	// as before (UpdateTrip does not touch coords, so existing ones are kept).
+	if in.StartLat != nil {
+		if err := apperror.FromDBOrNil(s.q.UpdateTripStartCoords(ctx, models.UpdateTripStartCoordsParams{
+			StartLat: in.StartLat, StartLng: in.StartLng, ID: tripID,
+		})); err != nil {
+			return nil, err
+		}
+	} else if in.StartLocation != nil {
 		go geocodeTripStart(tripID, *in.StartLocation)
 	}
 	trip, err := s.q.GetTrip(ctx, tripID)
@@ -332,13 +357,20 @@ func (s *TripService) AddDestination(ctx context.Context, tripID, userID uuid.UU
 	if strings.TrimSpace(in.Name) == "" {
 		return nil, apperror.UnprocessableEntity("destination name is required")
 	}
+	if err := validateCoords(in.Lat, in.Lng); err != nil {
+		return nil, err
+	}
 	d, err := s.q.InsertDestination(ctx, models.InsertDestinationParams{
 		TripID: tripID, Name: in.Name, ArrivalDate: types.DatePtr(in.ArrivalDate), SortOrder: in.SortOrder,
+		Lat: in.Lat, Lng: in.Lng,
 	})
 	if err != nil {
 		return nil, apperror.FromDB(err)
 	}
-	go geocodeDestination(d.ID, d.Name)
+	// A pin wins over a name lookup.
+	if in.Lat == nil {
+		go geocodeDestination(d.ID, d.Name)
+	}
 	return &d, nil
 }
 

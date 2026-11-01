@@ -1,10 +1,19 @@
--- name: ListPublicTrips :many
--- Public discovery. q matches title/description/start_location/destination names
--- (case-insensitive); trip_type filters exactly. Empty string = no filter.
+-- name: ListPublicTripsForExplore :many
+-- Public discovery with the aggregates the explore endpoint needs. q matches
+-- title/description/start_location/destination names (case-insensitive);
+-- trip_type filters exactly. Empty string = no filter. The remaining filters
+-- (days, destination, cost+currency conversion, following), sorting and paging
+-- happen in Go so currency conversion and cost filters stay correct.
+-- ponytail: returns the whole public set (frontend loads all today); add a SQL
+-- keyset page here if the public corpus ever gets large.
 SELECT
     sqlc.embed(t),
     u.name AS owner_name,
-    COALESCE(array_agg(d.name) FILTER (WHERE d.name IS NOT NULL), '{}')::text[] AS destination_names
+    COALESCE(array_agg(DISTINCT d.name) FILTER (WHERE d.name IS NOT NULL), '{}')::text[] AS destination_names,
+    COALESCE((SELECT SUM(e.amount) FROM expenses e WHERE e.trip_id = t.id AND e.hide_from_public = false), 0)::bigint AS total_spent,
+    (1 + (SELECT COUNT(*) FROM trip_participants p WHERE p.trip_id = t.id AND p.status = 'accepted' AND p.role = 'collaborator'))::int AS travellers,
+    (SELECT COUNT(*) FROM saved_trips s WHERE s.trip_id = t.id)::int AS saves_count,
+    (SELECT COUNT(*) FROM trip_likes l WHERE l.trip_id = t.id)::int AS likes_count
 FROM trips t
 JOIN users u ON u.id = t.owner_id
 LEFT JOIN trip_destinations d ON d.trip_id = t.id
@@ -21,8 +30,7 @@ WHERE t.is_public = true
   )
   AND (sqlc.arg(trip_type)::text = '' OR t.trip_type = sqlc.arg(trip_type)::text)
 GROUP BY t.id, u.name
-ORDER BY t.created_at DESC
-LIMIT sqlc.arg(lim)::int;
+ORDER BY t.created_at DESC;
 
 -- name: GetPublicTrip :one
 -- Returns the trip only if it is public — callers get NoRows (→ 404) otherwise,

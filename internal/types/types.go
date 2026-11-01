@@ -67,6 +67,7 @@ type LoginInput struct {
 type UpdateProfileInput struct {
 	Name     string  `json:"name"`
 	PhotoURL *string `json:"photo_url"`
+	Bio      *string `json:"bio"`
 }
 
 type PublicUser struct {
@@ -74,6 +75,7 @@ type PublicUser struct {
 	Name     string    `json:"name"`
 	Email    string    `json:"email"`
 	PhotoURL *string   `json:"photo_url"`
+	Bio      *string   `json:"bio"`
 }
 
 type AuthResponse struct {
@@ -84,20 +86,24 @@ type AuthResponse struct {
 // ─── Trips ──────────────────────────────────────────────────────────────────
 
 type TripInput struct {
-	Title         string  `json:"title"`
-	CoverImage    *string `json:"cover_image"`
-	Description   *string `json:"description"`
-	StartDate     *Date   `json:"start_date"`
-	EndDate       *Date   `json:"end_date"`
-	StartLocation *string `json:"start_location"`
-	TripType      *string `json:"trip_type"`
-	Currency      *string `json:"currency"`
+	Title         string   `json:"title"`
+	CoverImage    *string  `json:"cover_image"`
+	Description   *string  `json:"description"`
+	StartDate     *Date    `json:"start_date"`
+	EndDate       *Date    `json:"end_date"`
+	StartLocation *string  `json:"start_location"`
+	TripType      *string  `json:"trip_type"`
+	Currency      *string  `json:"currency"`
+	StartLat      *float64 `json:"start_lat"` // map pin; set only when pinned, wins over name lookup
+	StartLng      *float64 `json:"start_lng"`
 }
 
 type DestinationInput struct {
-	Name        string `json:"name"`
-	ArrivalDate *Date  `json:"arrival_date"`
-	SortOrder   int32  `json:"sort_order"`
+	Name        string   `json:"name"`
+	ArrivalDate *Date    `json:"arrival_date"`
+	SortOrder   int32    `json:"sort_order"`
+	Lat         *float64 `json:"lat"`
+	Lng         *float64 `json:"lng"`
 }
 
 type SetPublicInput struct {
@@ -175,6 +181,8 @@ type EntryInput struct {
 	EntryDate   Date          `json:"entry_date"`
 	EntryTime   *string       `json:"entry_time"` // "HH:MM"
 	Location    *string       `json:"location"`
+	Lat         *float64      `json:"lat"`
+	Lng         *float64      `json:"lng"`
 	Expense     *ExpenseInput `json:"expense"` // optional: create an expense linked to this entry in the same tx
 }
 
@@ -188,16 +196,20 @@ type PhotoInput struct {
 // ─── Transportation ─────────────────────────────────────────────────────────
 
 type TransportInput struct {
-	EntryID     *uuid.UUID `json:"entry_id"`
-	ExpenseID   *uuid.UUID `json:"expense_id"`
-	Type        string     `json:"type"`
-	StartPoint  *string    `json:"start_point"`
-	Destination *string    `json:"destination"`
-	DepartAt    *time.Time `json:"depart_at"` // RFC3339
-	DistanceKm  *float64   `json:"distance_km"`
-	DurationMin *int32     `json:"duration_min"`
-	CostAmount  *int64     `json:"cost_amount"` // minor units
-	Notes       *string    `json:"notes"`
+	EntryID        *uuid.UUID `json:"entry_id"`
+	ExpenseID      *uuid.UUID `json:"expense_id"`
+	Type           string     `json:"type"`
+	StartPoint     *string    `json:"start_point"`
+	Destination    *string    `json:"destination"`
+	DepartAt       *time.Time `json:"depart_at"` // RFC3339
+	DistanceKm     *float64   `json:"distance_km"`
+	DurationMin    *int32     `json:"duration_min"`
+	CostAmount     *int64     `json:"cost_amount"` // minor units
+	Notes          *string    `json:"notes"`
+	StartLat       *float64   `json:"start_lat"`
+	StartLng       *float64   `json:"start_lng"`
+	DestinationLat *float64   `json:"destination_lat"`
+	DestinationLng *float64   `json:"destination_lng"`
 	// Optional nested expense: created first, then the journey is saved with
 	// expense_id set to it (overriding any expense_id above), in one transaction.
 	Expense *ExpenseInput `json:"expense"`
@@ -241,6 +253,7 @@ type ExpenseInput struct {
 	OriginalCurrency *string  `json:"original_currency"`
 	OriginalAmount   *int64   `json:"original_amount"` // minor units of original_currency
 	ExchangeRate     *float64 `json:"exchange_rate"`   // trip-currency units per 1 original unit, > 0
+	FromPool         bool     `json:"from_pool"`       // spent from the pool; paid_by must be the collector
 }
 
 type Party struct {
@@ -269,6 +282,7 @@ type SettlementInput struct {
 	SettledDate Date     `json:"settled_date"`
 	Status      *string  `json:"status"` // "completed" (default) | "pending"
 	Notes       *string  `json:"notes"`
+	Kind        *string  `json:"kind"` // "repayment" (default) | "contribution" (to = collector)
 }
 
 type BalanceEntry struct {
@@ -307,6 +321,7 @@ type SummaryResponse struct {
 // Nothing financial or personal beyond these appears in public responses.
 type PublicTripSafe struct {
 	ID            uuid.UUID `json:"id"`
+	OwnerID       uuid.UUID `json:"owner_id"` // web app links owner names to /u/<owner_id>
 	Title         string    `json:"title"`
 	Description   *string   `json:"description"`
 	CoverImage    *string   `json:"cover_image"`
@@ -324,10 +339,43 @@ type PublicTripListItem struct {
 	Trip         PublicTripSafe `json:"trip"`
 	Destinations []string       `json:"destinations"`
 	OwnerName    string         `json:"owner_name"`
+	// cost_per_person is total spent ÷ travellers in the trip's currency, or null
+	// when the owner keeps costs private. converted is set only when a different
+	// `currency` was requested (approximate; the web app labels it "≈").
+	CostPerPerson          *int64         `json:"cost_per_person"`
+	CostPerPersonConverted *ConvertedCost `json:"cost_per_person_converted,omitempty"`
+	// Likes & saves (stage 6). Populated by the explore/profile/detail paths.
+	Likes     int64 `json:"likes"`
+	LikedByMe bool  `json:"liked_by_me"`
+	Saves     int64 `json:"saves"`
+	SavedByMe bool  `json:"saved_by_me"`
+}
+
+type ConvertedCost struct {
+	Amount   int64  `json:"amount"`
+	Currency string `json:"currency"`
 }
 
 type PublicTripListResponse struct {
-	Trips []PublicTripListItem `json:"trips"`
+	Trips      []PublicTripListItem `json:"trips"`
+	NextCursor *string              `json:"next_cursor,omitempty"` // absent on the last page
+}
+
+// ExploreParams holds the parsed query of GET /public/trips. All fields are
+// optional; zero values mean "no filter".
+type ExploreParams struct {
+	Q                string
+	TripType         string
+	Destination      string
+	MinDays          *int
+	MaxDays          *int
+	MinCostPerPerson *int64
+	MaxCostPerPerson *int64
+	Currency         string // target for cost filter + cost_per_person_converted
+	Sort             string // shortest | longest | soonest | popular | ""(default)
+	Following        bool   // only trips by people the visitor follows (signed in)
+	Limit            int
+	Cursor           string
 }
 
 type PublicPerson struct {
@@ -351,19 +399,25 @@ type PublicEntry struct {
 	EntryDate   Date      `json:"entry_date"`
 	EntryTime   *string   `json:"entry_time"`
 	Location    *string   `json:"location"`
+	Lat         *float64  `json:"lat"`
+	Lng         *float64  `json:"lng"`
 }
 
 type PublicTransport struct {
-	ID          uuid.UUID  `json:"id"`
-	Type        string     `json:"type"`
-	StartPoint  *string    `json:"start_point"`
-	Destination *string    `json:"destination"`
-	DepartAt    *time.Time `json:"depart_at"`
-	DistanceKm  *float64   `json:"distance_km"`
-	DurationMin *int32     `json:"duration_min"`
-	Notes       *string    `json:"notes"`
-	EntryID     *uuid.UUID `json:"entry_id"`
-	CostAmount  *int64     `json:"cost_amount,omitempty"` // only when show_costs_public
+	ID             uuid.UUID  `json:"id"`
+	Type           string     `json:"type"`
+	StartPoint     *string    `json:"start_point"`
+	Destination    *string    `json:"destination"`
+	DepartAt       *time.Time `json:"depart_at"`
+	DistanceKm     *float64   `json:"distance_km"`
+	DurationMin    *int32     `json:"duration_min"`
+	Notes          *string    `json:"notes"`
+	EntryID        *uuid.UUID `json:"entry_id"`
+	StartLat       *float64   `json:"start_lat"`
+	StartLng       *float64   `json:"start_lng"`
+	DestinationLat *float64   `json:"destination_lat"`
+	DestinationLng *float64   `json:"destination_lng"`
+	CostAmount     *int64     `json:"cost_amount,omitempty"` // only when show_costs_public
 }
 
 type PublicPhoto struct {
@@ -390,9 +444,232 @@ type PublicTripDetail struct {
 	Transportation []PublicTransport   `json:"transportation"`
 	Photos         []PublicPhoto       `json:"photos"`
 	Budget         *PublicBudget       `json:"budget"`
+	Likes          int64               `json:"likes"`
+	LikedByMe      bool                `json:"liked_by_me"`
+	Saves          int64               `json:"saves"`
+	SavedByMe      bool                `json:"saved_by_me"`
 }
 
 type CopyTripInput struct {
 	Title     string `json:"title"`
 	StartDate Date   `json:"start_date"`
+}
+
+// ─── RSVP invite links ────────────────────────────────────────────────────────
+
+type InviteLinkInput struct {
+	Active   bool    `json:"active"`
+	JoinMode string  `json:"join_mode"` // anyone | friends | approval
+	Spots    *int32  `json:"spots"`     // null = unlimited
+	ReplyBy  *Date   `json:"reply_by"`  // null = no deadline
+	Role     string  `json:"role"`      // collaborator | viewer (granted on Going)
+	Message  *string `json:"message"`
+}
+
+type InviteLinkResponse struct {
+	Token    string  `json:"token"`
+	Active   bool    `json:"active"`
+	JoinMode string  `json:"join_mode"`
+	Spots    *int32  `json:"spots"`
+	ReplyBy  *Date   `json:"reply_by"`
+	Role     string  `json:"role"`
+	Message  *string `json:"message"`
+}
+
+type RSVPItem struct {
+	ID        uuid.UUID `json:"id"`
+	UserID    uuid.UUID `json:"user_id"`
+	Name      string    `json:"name"`
+	PhotoURL  *string   `json:"photo_url"`
+	Status    string    `json:"status"`
+	RepliedAt time.Time `json:"replied_at"`
+}
+
+type RSVPListResponse struct {
+	RSVPs []RSVPItem `json:"rsvps"`
+}
+
+// Invitee-facing /join/:token views.
+
+type JoinTripInfo struct {
+	ID            uuid.UUID `json:"id"`
+	Title         string    `json:"title"`
+	CoverImage    *string   `json:"cover_image"`
+	StartDate     *Date     `json:"start_date"`
+	EndDate       *Date     `json:"end_date"`
+	StartLocation *string   `json:"start_location"`
+	TripType      *string   `json:"trip_type"`
+	Currency      string    `json:"currency"`
+}
+
+type JoinPerson struct {
+	Name     string  `json:"name"`
+	PhotoURL *string `json:"photo_url"`
+}
+
+type JoinCounts struct {
+	Going int `json:"going"`
+	Maybe int `json:"maybe"`
+}
+
+type JoinResponse struct {
+	Trip                 JoinTripInfo `json:"trip"`
+	Destinations         []string     `json:"destinations"`
+	Organiser            JoinPerson   `json:"organiser"`
+	Message              *string      `json:"message"`
+	JoinMode             string       `json:"join_mode"`
+	Spots                *int32       `json:"spots"`
+	ReplyBy              *Date        `json:"reply_by"`
+	Closed               bool         `json:"closed"`
+	Counts               JoinCounts   `json:"counts"`
+	GoingPeople          []JoinPerson `json:"going_people"`
+	PlannedCostPerPerson *int64       `json:"planned_cost_per_person,omitempty"`
+	MyRSVP               *string      `json:"my_rsvp,omitempty"`
+}
+
+type RSVPReplyInput struct {
+	Status string `json:"status"` // going | maybe | declined
+}
+
+type RSVPReplyResponse struct {
+	Status string    `json:"status"` // what actually happened (may be waitlist/requested)
+	TripID uuid.UUID `json:"trip_id"`
+}
+
+// ─── People: profiles, follows, friends, blocks, reports ──────────────────────
+
+type ProfileUser struct {
+	ID        uuid.UUID `json:"id"`
+	Name      string    `json:"name"`
+	PhotoURL  *string   `json:"photo_url"`
+	Bio       *string   `json:"bio"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type ProfileStats struct {
+	Trips     int `json:"trips"` // public trips only
+	Followers int `json:"followers"`
+	Following int `json:"following"`
+	Friends   int `json:"friends"`
+}
+
+// Relationship is the viewer's relationship to the profile owner; null when
+// signed out or viewing yourself. friend ∈ none|requested|incoming|friends.
+type Relationship struct {
+	Following  bool   `json:"following"`
+	FollowsYou bool   `json:"follows_you"`
+	Friend     string `json:"friend"`
+	Blocked    bool   `json:"blocked"`
+}
+
+type ProfileResponse struct {
+	User         ProfileUser          `json:"user"`
+	Stats        ProfileStats         `json:"stats"`
+	Trips        []PublicTripListItem `json:"trips"`
+	Relationship *Relationship        `json:"relationship"`
+}
+
+type PersonBrief struct {
+	ID       uuid.UUID `json:"id"`
+	Name     string    `json:"name"`
+	PhotoURL *string   `json:"photo_url"`
+}
+
+type FriendsResponse struct {
+	Friends  []PersonBrief `json:"friends"`
+	Incoming []PersonBrief `json:"incoming"`
+	Outgoing []PersonBrief `json:"outgoing"`
+}
+
+type BlockedResponse struct {
+	Users []PersonBrief `json:"users"`
+}
+
+type ReportInput struct {
+	SubjectType string    `json:"subject_type"` // user | trip | comment
+	SubjectID   uuid.UUID `json:"subject_id"`
+	Reason      string    `json:"reason"` // spam|harassment|inappropriate|misleading|other
+	Details     *string   `json:"details"`
+}
+
+// ─── Notifications ────────────────────────────────────────────────────────────
+
+type NotificationActor struct {
+	ID       uuid.UUID `json:"id"`
+	Name     string    `json:"name"`
+	PhotoURL *string   `json:"photo_url"`
+}
+
+type NotificationTrip struct {
+	ID    uuid.UUID `json:"id"`
+	Title string    `json:"title"`
+}
+
+type NotificationItem struct {
+	ID         uuid.UUID          `json:"id"`
+	Type       string             `json:"type"`
+	Actor      *NotificationActor `json:"actor"`
+	Trip       *NotificationTrip  `json:"trip"`
+	CommentID  *uuid.UUID         `json:"comment_id"`
+	RSVPStatus *string            `json:"rsvp_status"`
+	CreatedAt  time.Time          `json:"created_at"`
+	Read       bool               `json:"read"`
+}
+
+type NotificationsResponse struct {
+	Notifications []NotificationItem `json:"notifications"`
+	Unread        int                `json:"unread"` // total unread, not just this page
+	NextCursor    *string            `json:"next_cursor,omitempty"`
+}
+
+type MarkReadInput struct {
+	IDs []uuid.UUID `json:"ids"` // absent/empty → mark all read
+}
+
+// ─── Comments ─────────────────────────────────────────────────────────────────
+
+type CommentInput struct {
+	Body     string     `json:"body"`
+	ParentID *uuid.UUID `json:"parent_id"` // reply target; must be a top-level comment on the same trip
+}
+
+type UpdateCommentInput struct {
+	Body string `json:"body"`
+}
+
+type CommentAuthor struct {
+	ID       uuid.UUID `json:"id"`
+	Name     string    `json:"name"`
+	PhotoURL *string   `json:"photo_url"`
+}
+
+type CommentItem struct {
+	ID        uuid.UUID     `json:"id"`
+	Author    CommentAuthor `json:"author"`
+	Body      string        `json:"body"`
+	CreatedAt time.Time     `json:"created_at"`
+	EditedAt  *time.Time    `json:"edited_at"`
+	ParentID  *uuid.UUID    `json:"parent_id"`
+}
+
+type CommentsResponse struct {
+	Comments   []CommentItem `json:"comments"`
+	NextCursor *string       `json:"next_cursor,omitempty"`
+}
+
+// ─── Trip pool ────────────────────────────────────────────────────────────────
+
+type PoolInput struct {
+	CollectorID uuid.UUID `json:"collector_id"`
+	PerPerson   int64     `json:"per_person"` // minor units, > 0
+	DueDate     *Date     `json:"due_date"`
+}
+
+type PoolResponse struct {
+	Enabled     bool      `json:"enabled"`
+	CollectorID uuid.UUID `json:"collector_id"`
+	PerPerson   int64     `json:"per_person"`
+	DueDate     *Date     `json:"due_date"`
+	Collected   int64     `json:"collected"` // sum of completed contributions
+	Spent       int64     `json:"spent"`     // sum of from_pool expenses
 }

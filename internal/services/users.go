@@ -28,7 +28,42 @@ func NewUserService() *UserService {
 }
 
 func publicUser(u models.User) types.PublicUser {
-	return types.PublicUser{ID: u.ID, Name: u.Name, Email: u.Email, PhotoURL: u.PhotoUrl}
+	return types.PublicUser{ID: u.ID, Name: u.Name, Email: u.Email, PhotoURL: u.PhotoUrl, Bio: u.Bio}
+}
+
+// maxBioLen bounds a profile bio.
+const maxBioLen = 160
+
+// normalizeHTTPSURL trims an optional image URL: an empty value clears it (→ nil,
+// stored NULL) so a removed photo stays removed; a non-empty value must be an
+// https:// link (images are uploaded to ImageKit; we only store the address).
+func normalizeHTTPSURL(p *string) (*string, error) {
+	if p == nil {
+		return nil, nil
+	}
+	s := strings.TrimSpace(*p)
+	if s == "" {
+		return nil, nil
+	}
+	if !strings.HasPrefix(s, "https://") {
+		return nil, apperror.UnprocessableEntity("image URL must be an https:// link")
+	}
+	return &s, nil
+}
+
+// normalizeBio trims an optional bio: empty clears it; capped at maxBioLen.
+func normalizeBio(p *string) (*string, error) {
+	if p == nil {
+		return nil, nil
+	}
+	s := strings.TrimSpace(*p)
+	if s == "" {
+		return nil, nil
+	}
+	if len([]rune(s)) > maxBioLen {
+		return nil, apperror.UnprocessableEntity("bio must be at most 160 characters")
+	}
+	return &s, nil
 }
 
 func (s *UserService) Register(ctx context.Context, in types.RegisterInput) (*types.AuthResponse, error) {
@@ -89,7 +124,15 @@ func (s *UserService) UpdateProfile(ctx context.Context, userID uuid.UUID, in ty
 	if strings.TrimSpace(in.Name) == "" {
 		return apperror.UnprocessableEntity("name is required")
 	}
+	photo, err := normalizeHTTPSURL(in.PhotoURL)
+	if err != nil {
+		return err
+	}
+	bio, err := normalizeBio(in.Bio)
+	if err != nil {
+		return err
+	}
 	return apperror.FromDBOrNil(s.q.UpdateUserProfile(ctx, models.UpdateUserProfileParams{
-		Name: in.Name, PhotoUrl: in.PhotoURL, ID: userID,
+		Name: in.Name, PhotoUrl: photo, Bio: bio, ID: userID,
 	}))
 }

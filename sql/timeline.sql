@@ -1,8 +1,8 @@
 -- name: InsertEntry :one
 INSERT INTO timeline_entries (
-    trip_id, title, description, entry_date, entry_time, location, created_by, last_modified_by
+    trip_id, title, description, entry_date, entry_time, location, lat, lng, created_by, last_modified_by
 ) VALUES (
-    @trip_id, @title, @description, @entry_date, @entry_time, @location, @created_by, @created_by
+    @trip_id, @title, @description, @entry_date, @entry_time, @location, @lat, @lng, @created_by, @created_by
 )
 RETURNING *;
 
@@ -21,6 +21,8 @@ UPDATE timeline_entries SET
     entry_date = @entry_date,
     entry_time = @entry_time,
     location = @location,
+    lat = @lat,
+    lng = @lng,
     last_modified_by = @last_modified_by,
     updated_at = now()
 WHERE id = @id;

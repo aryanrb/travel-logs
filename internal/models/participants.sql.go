@@ -202,6 +202,21 @@ func (q *Queries) ListParticipants(ctx context.Context, tripID uuid.UUID) ([]Lis
 	return items, nil
 }
 
+const revokeParticipantByUser = `-- name: RevokeParticipantByUser :exec
+UPDATE trip_participants SET status = 'revoked' WHERE trip_id = $1 AND user_id = $2
+`
+
+type RevokeParticipantByUserParams struct {
+	TripID uuid.UUID  `db:"trip_id" json:"trip_id"`
+	UserID *uuid.UUID `db:"user_id" json:"user_id"`
+}
+
+// Revokes a user's access to a trip (RSVP changed away from Going / reply removed).
+func (q *Queries) RevokeParticipantByUser(ctx context.Context, arg RevokeParticipantByUserParams) error {
+	_, err := q.db.Exec(ctx, revokeParticipantByUser, arg.TripID, arg.UserID)
+	return err
+}
+
 const setParticipantStatus = `-- name: SetParticipantStatus :exec
 UPDATE trip_participants SET status = $1 WHERE id = $2 AND trip_id = $3
 `
@@ -229,5 +244,25 @@ type UpdateParticipantRoleParams struct {
 
 func (q *Queries) UpdateParticipantRole(ctx context.Context, arg UpdateParticipantRoleParams) error {
 	_, err := q.db.Exec(ctx, updateParticipantRole, arg.Role, arg.ID, arg.TripID)
+	return err
+}
+
+const upsertRSVPParticipant = `-- name: UpsertRSVPParticipant :exec
+INSERT INTO trip_participants (trip_id, user_id, role, status, accepted_at)
+VALUES ($1, $2, $3, 'accepted', now())
+ON CONFLICT (trip_id, user_id) WHERE user_id IS NOT NULL
+DO UPDATE SET role = EXCLUDED.role, status = 'accepted', accepted_at = now()
+`
+
+type UpsertRSVPParticipantParams struct {
+	TripID uuid.UUID  `db:"trip_id" json:"trip_id"`
+	UserID *uuid.UUID `db:"user_id" json:"user_id"`
+	Role   string     `db:"role" json:"role"`
+}
+
+// RSVP Going/Maybe grants accepted access with the given role, creating or
+// reactivating the (trip, user) participant row.
+func (q *Queries) UpsertRSVPParticipant(ctx context.Context, arg UpsertRSVPParticipantParams) error {
+	_, err := q.db.Exec(ctx, upsertRSVPParticipant, arg.TripID, arg.UserID, arg.Role)
 	return err
 }

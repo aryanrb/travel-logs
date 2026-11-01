@@ -61,6 +61,21 @@ func (h *SettlementHandler) Create(c echo.Context) error {
 	return responder.JSONResponse(c, st, http.StatusCreated)
 }
 
+func (h *SettlementHandler) Confirm(c echo.Context) error {
+	tripID, err := pathID(c, "id")
+	if err != nil {
+		return err
+	}
+	sid, err := pathID(c, "sid")
+	if err != nil {
+		return err
+	}
+	if err := h.svc.Confirm(c.Request().Context(), tripID, sid, auth.UserID(c)); err != nil {
+		return err
+	}
+	return responder.JSONResponse(c, "confirmed", http.StatusOK)
+}
+
 func (h *SettlementHandler) Delete(c echo.Context) error {
 	tripID, err := pathID(c, "id")
 	if err != nil {

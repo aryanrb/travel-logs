@@ -25,7 +25,21 @@ func NewPublicHandler() *PublicHandler {
 // are not behind the auth middleware).
 
 func (h *PublicHandler) List(c echo.Context) error {
-	res, err := h.svc.ListTrips(c.Request().Context(), c.QueryParam("q"), c.QueryParam("trip_type"))
+	p := types.ExploreParams{
+		Q:                c.QueryParam("q"),
+		TripType:         c.QueryParam("trip_type"),
+		Destination:      c.QueryParam("destination"),
+		MinDays:          queryInt(c, "min_days"),
+		MaxDays:          queryInt(c, "max_days"),
+		MinCostPerPerson: queryInt64(c, "min_cost_per_person"),
+		MaxCostPerPerson: queryInt64(c, "max_cost_per_person"),
+		Currency:         c.QueryParam("currency"),
+		Sort:             c.QueryParam("sort"),
+		Following:        c.QueryParam("following") == "true",
+		Limit:            intOr(c.QueryParam("limit"), 0),
+		Cursor:           c.QueryParam("cursor"),
+	}
+	res, err := h.svc.ListTrips(c.Request().Context(), p, auth.OptionalUserID(c))
 	if err != nil {
 		return err
 	}
@@ -37,11 +51,33 @@ func (h *PublicHandler) Get(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	res, err := h.svc.GetTrip(c.Request().Context(), id)
+	res, err := h.svc.GetTrip(c.Request().Context(), id, auth.OptionalUserID(c))
 	if err != nil {
 		return err
 	}
 	return responder.JSONResponse(c, res, http.StatusOK)
+}
+
+func (h *PublicHandler) Like(c echo.Context) error {
+	id, err := pathID(c, "id")
+	if err != nil {
+		return err
+	}
+	if err := h.svc.Like(c.Request().Context(), id, auth.UserID(c)); err != nil {
+		return err
+	}
+	return responder.JSONResponse(c, "liked", http.StatusOK)
+}
+
+func (h *PublicHandler) Unlike(c echo.Context) error {
+	id, err := pathID(c, "id")
+	if err != nil {
+		return err
+	}
+	if err := h.svc.Unlike(c.Request().Context(), id, auth.UserID(c)); err != nil {
+		return err
+	}
+	return responder.JSONResponse(c, "unliked", http.StatusOK)
 }
 
 // Save/Unsave/ListSaved require auth. Save and Unsave are idempotent and 404 when

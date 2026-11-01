@@ -87,11 +87,15 @@ func (q *Queries) ListPublicPeople(ctx context.Context, tripID uuid.UUID) ([]Lis
 	return items, nil
 }
 
-const listPublicTrips = `-- name: ListPublicTrips :many
+const listPublicTripsForExplore = `-- name: ListPublicTripsForExplore :many
 SELECT
     t.id, t.owner_id, t.title, t.cover_image, t.description, t.start_date, t.end_date, t.start_location, t.trip_type, t.currency, t.is_public, t.archived_at, t.created_at, t.updated_at, t.show_costs_public, t.budget_amount, t.start_lat, t.start_lng,
     u.name AS owner_name,
-    COALESCE(array_agg(d.name) FILTER (WHERE d.name IS NOT NULL), '{}')::text[] AS destination_names
+    COALESCE(array_agg(DISTINCT d.name) FILTER (WHERE d.name IS NOT NULL), '{}')::text[] AS destination_names,
+    COALESCE((SELECT SUM(e.amount) FROM expenses e WHERE e.trip_id = t.id AND e.hide_from_public = false), 0)::bigint AS total_spent,
+    (1 + (SELECT COUNT(*) FROM trip_participants p WHERE p.trip_id = t.id AND p.status = 'accepted' AND p.role = 'collaborator'))::int AS travellers,
+    (SELECT COUNT(*) FROM saved_trips s WHERE s.trip_id = t.id)::int AS saves_count,
+    (SELECT COUNT(*) FROM trip_likes l WHERE l.trip_id = t.id)::int AS likes_count
 FROM trips t
 JOIN users u ON u.id = t.owner_id
 LEFT JOIN trip_destinations d ON d.trip_id = t.id
@@ -109,32 +113,39 @@ WHERE t.is_public = true
   AND ($2::text = '' OR t.trip_type = $2::text)
 GROUP BY t.id, u.name
 ORDER BY t.created_at DESC
-LIMIT $3::int
 `
 
-type ListPublicTripsParams struct {
+type ListPublicTripsForExploreParams struct {
 	Q        string `db:"q" json:"q"`
 	TripType string `db:"trip_type" json:"trip_type"`
-	Lim      int32  `db:"lim" json:"lim"`
 }
 
-type ListPublicTripsRow struct {
+type ListPublicTripsForExploreRow struct {
 	Trip             Trip     `db:"trip" json:"trip"`
 	OwnerName        string   `db:"owner_name" json:"owner_name"`
 	DestinationNames []string `db:"destination_names" json:"destination_names"`
+	TotalSpent       int64    `db:"total_spent" json:"total_spent"`
+	Travellers       int32    `db:"travellers" json:"travellers"`
+	SavesCount       int32    `db:"saves_count" json:"saves_count"`
+	LikesCount       int32    `db:"likes_count" json:"likes_count"`
 }
 
-// Public discovery. q matches title/description/start_location/destination names
-// (case-insensitive); trip_type filters exactly. Empty string = no filter.
-func (q *Queries) ListPublicTrips(ctx context.Context, arg ListPublicTripsParams) ([]ListPublicTripsRow, error) {
-	rows, err := q.db.Query(ctx, listPublicTrips, arg.Q, arg.TripType, arg.Lim)
+// Public discovery with the aggregates the explore endpoint needs. q matches
+// title/description/start_location/destination names (case-insensitive);
+// trip_type filters exactly. Empty string = no filter. The remaining filters
+// (days, destination, cost+currency conversion, following), sorting and paging
+// happen in Go so currency conversion and cost filters stay correct.
+// ponytail: returns the whole public set (frontend loads all today); add a SQL
+// keyset page here if the public corpus ever gets large.
+func (q *Queries) ListPublicTripsForExplore(ctx context.Context, arg ListPublicTripsForExploreParams) ([]ListPublicTripsForExploreRow, error) {
+	rows, err := q.db.Query(ctx, listPublicTripsForExplore, arg.Q, arg.TripType)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []ListPublicTripsRow{}
+	items := []ListPublicTripsForExploreRow{}
 	for rows.Next() {
-		var i ListPublicTripsRow
+		var i ListPublicTripsForExploreRow
 		if err := rows.Scan(
 			&i.Trip.ID,
 			&i.Trip.OwnerID,
@@ -156,6 +167,10 @@ func (q *Queries) ListPublicTrips(ctx context.Context, arg ListPublicTripsParams
 			&i.Trip.StartLng,
 			&i.OwnerName,
 			&i.DestinationNames,
+			&i.TotalSpent,
+			&i.Travellers,
+			&i.SavesCount,
+			&i.LikesCount,
 		); err != nil {
 			return nil, err
 		}

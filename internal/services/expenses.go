@@ -386,7 +386,10 @@ func (s *ExpenseService) Get(ctx context.Context, tripID, expenseID, userID uuid
 	return s.buildResponse(ctx, e)
 }
 
-func (s *ExpenseService) List(ctx context.Context, tripID, userID uuid.UUID) ([]models.Expense, error) {
+// List returns every expense with its payer and shares (and last_modified_by),
+// so the client has them on each row without fetching expenses one by one. The
+// expense fields stay flat (unchanged); shares for the whole trip load in one query.
+func (s *ExpenseService) List(ctx context.Context, tripID, userID uuid.UUID) ([]types.ExpenseListItem, error) {
 	if _, _, err := requireViewer(ctx, s.q, tripID, userID); err != nil {
 		return nil, err
 	}
@@ -394,7 +397,25 @@ func (s *ExpenseService) List(ctx context.Context, tripID, userID uuid.UUID) ([]
 	if err != nil {
 		return nil, apperror.FromDB(err)
 	}
-	return rows, nil
+	shares, err := s.q.ListSharesForTrip(ctx, tripID)
+	if err != nil {
+		return nil, apperror.FromDB(err)
+	}
+	byExpense := make(map[uuid.UUID][]models.ListSharesForTripRow, len(rows))
+	for _, sh := range shares {
+		byExpense[sh.ExpenseID] = append(byExpense[sh.ExpenseID], sh)
+	}
+	r := newPartyResolver(ctx, s.q)
+	out := make([]types.ExpenseListItem, len(rows))
+	for i, e := range rows {
+		es := byExpense[e.ID]
+		shareOut := make([]types.ShareOut, len(es))
+		for j, sh := range es {
+			shareOut[j] = types.ShareOut{Party: r.party(sh.UserID, sh.ExternalID), Amount: sh.Amount, Percent: sharePercentFor(sh.Amount, e.Amount, e.SplitMethod)}
+		}
+		out[i] = types.ExpenseListItem{Expense: e, PaidBy: r.party(e.PaidByUserID, e.PaidByExternalID), Shares: shareOut}
+	}
+	return out, nil
 }
 
 func (s *ExpenseService) Update(ctx context.Context, tripID, expenseID, userID uuid.UUID, in types.ExpenseInput) (*types.ExpenseResponse, error) {
@@ -437,6 +458,7 @@ func (s *ExpenseService) Update(ctx context.Context, tripID, expenseID, userID u
 	if err != nil {
 		return nil, err
 	}
+	uid := userID
 	if err := qtx.UpdateExpense(ctx, models.UpdateExpenseParams{
 		Title:            in.Title,
 		Amount:           in.Amount,
@@ -454,6 +476,7 @@ func (s *ExpenseService) Update(ctx context.Context, tripID, expenseID, userID u
 		OriginalAmount:   in.OriginalAmount,
 		ExchangeRate:     in.ExchangeRate,
 		FromPool:         in.FromPool,
+		LastModifiedBy:   &uid,
 		ID:               expenseID,
 	}); err != nil {
 		return nil, apperror.FromDB(err)
@@ -504,6 +527,24 @@ func (s *ExpenseService) Delete(ctx context.Context, tripID, expenseID, userID u
 	})
 }
 
+// sharePercent is a share's slice of the expense total, to 2 dp.
+func sharePercent(amount, total int64) float64 {
+	if total == 0 {
+		return 0
+	}
+	return math.Round(float64(amount)/float64(total)*10000) / 100
+}
+
+// sharePercentFor returns a share's percent of the total for custom splits, and
+// nil for equal splits (where every slice is just 100/n, so percent adds nothing).
+func sharePercentFor(amount, total int64, splitMethod string) *float64 {
+	if splitMethod != "custom" {
+		return nil
+	}
+	p := sharePercent(amount, total)
+	return &p
+}
+
 func (s *ExpenseService) buildResponse(ctx context.Context, e models.Expense) (*types.ExpenseResponse, error) {
 	rawShares, err := s.q.ListSharesForExpense(ctx, e.ID)
 	if err != nil {
@@ -512,7 +553,7 @@ func (s *ExpenseService) buildResponse(ctx context.Context, e models.Expense) (*
 	r := newPartyResolver(ctx, s.q)
 	shares := make([]types.ShareOut, len(rawShares))
 	for i, sh := range rawShares {
-		shares[i] = types.ShareOut{Party: r.party(sh.UserID, sh.ExternalID), Amount: sh.Amount}
+		shares[i] = types.ShareOut{Party: r.party(sh.UserID, sh.ExternalID), Amount: sh.Amount, Percent: sharePercentFor(sh.Amount, e.Amount, e.SplitMethod)}
 	}
 	return &types.ExpenseResponse{
 		Expense: e,

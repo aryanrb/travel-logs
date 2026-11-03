@@ -83,3 +83,36 @@ func TestSettlementStatusAffectsBalance(t *testing.T) {
 		t.Fatalf("a net after completed settlement = %d, want 0", got)
 	}
 }
+
+// Confirm-on-receive: a settlement counts only when the receiver or trip owner
+// records it; anyone else's is forced pending, whatever was requested.
+func TestSettlementStatusConfirmOnReceive(t *testing.T) {
+	cases := []struct {
+		requested   string
+		canComplete bool
+		want        string
+	}{
+		{"completed", true, "completed"}, // receiver/owner → counts now
+		{"completed", false, "pending"},  // anyone else → forced pending
+		{"pending", false, "pending"},    // explicit pending stays
+		{"pending", true, "pending"},     // receiver may still record pending
+	}
+	for _, c := range cases {
+		if got := settlementStatus(c.requested, c.canComplete); got != c.want {
+			t.Fatalf("settlementStatus(%q,%v) = %q, want %q", c.requested, c.canComplete, got, c.want)
+		}
+	}
+}
+
+// sharePercent derives a share's slice of the expense total, to 2 dp.
+func TestSharePercent(t *testing.T) {
+	if got := sharePercent(2500, 10000); got != 25 {
+		t.Fatalf("2500/10000 = %v, want 25", got)
+	}
+	if got := sharePercent(1, 3); got != 33.33 {
+		t.Fatalf("1/3 = %v, want 33.33", got)
+	}
+	if got := sharePercent(5, 0); got != 0 {
+		t.Fatalf("zero total = %v, want 0", got)
+	}
+}

@@ -36,6 +36,16 @@ type balanceAgg struct {
 	paid, share, settledPaid, settledRecv int64
 }
 
+// settlementStatus applies the confirm-on-receive rule: a settlement counts
+// (completed) only when recorded by the receiver or the trip owner (canComplete);
+// otherwise it is stored pending until confirmed, whatever was requested.
+func settlementStatus(requested string, canComplete bool) string {
+	if requested == "completed" && !canComplete {
+		return "pending"
+	}
+	return requested
+}
+
 func mkKey(userID, externalID *uuid.UUID) (partyKey, bool) {
 	switch {
 	case userID != nil:
@@ -156,7 +166,7 @@ func (s *SettlementService) List(ctx context.Context, tripID, userID uuid.UUID) 
 }
 
 func (s *SettlementService) Create(ctx context.Context, tripID, userID uuid.UUID, in types.SettlementInput) (*models.Settlement, error) {
-	_, trip, err := requireContributor(ctx, s.q, tripID, userID)
+	role, trip, err := requireContributor(ctx, s.q, tripID, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -215,6 +225,12 @@ func (s *SettlementService) Create(ctx context.Context, tripID, userID uuid.UUID
 		collectorID = &pool.CollectorID
 	}
 
+	// Money counts only once the receiver agrees it arrived: only the receiver or
+	// the trip owner may record a settlement completed. Anyone else's is stored
+	// pending, whatever was sent, until confirmed (core money rule).
+	canComplete := role == RoleOwner || (toUser != nil && *toUser == userID)
+	status = settlementStatus(status, canComplete)
+
 	st, err := qtx.InsertSettlement(ctx, models.InsertSettlementParams{
 		TripID:         tripID,
 		FromUserID:     fromUser,
@@ -241,9 +257,20 @@ func (s *SettlementService) Create(ctx context.Context, tripID, userID uuid.UUID
 	if err := tx.Commit(ctx); err != nil {
 		return nil, apperror.Internal("could not save settlement")
 	}
-	// A pending contribution ("I've paid in") pings the collector.
-	if kind == "contribution" && status == "pending" && collectorID != nil {
+	// A pending repayment pings whoever must confirm it. A contribution → the
+	// collector (pool_contribution); an ordinary repayment → the receiver, or the
+	// trip owner when the receiver has no account (external) or was removed.
+	switch {
+	case status != "pending":
+		// counted straight away (recorded by the receiver or owner) — no ping.
+	case kind == "contribution" && collectorID != nil:
 		notify(ctx, s.q, notifyParams{UserID: *collectorID, Type: "pool_contribution", ActorID: &userID, TripID: &tripID})
+	default:
+		recipient := trip.OwnerID
+		if toUser != nil {
+			recipient = *toUser
+		}
+		notify(ctx, s.q, notifyParams{UserID: recipient, Type: "settlement_pending", ActorID: &userID, TripID: &tripID})
 	}
 	return &st, nil
 }

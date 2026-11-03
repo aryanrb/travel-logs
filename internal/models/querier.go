@@ -79,6 +79,7 @@ type Querier interface {
 	InsertDestination(ctx context.Context, arg InsertDestinationParams) (TripDestination, error)
 	InsertEntry(ctx context.Context, arg InsertEntryParams) (TimelineEntry, error)
 	InsertEvent(ctx context.Context, arg InsertEventParams) (TripEvent, error)
+	// last_modified_by starts as the creator (recorded_by), mirroring timeline entries.
 	InsertExpense(ctx context.Context, arg InsertExpenseParams) (Expense, error)
 	InsertFriendRequest(ctx context.Context, arg InsertFriendRequestParams) error
 	InsertNotification(ctx context.Context, arg InsertNotificationParams) (Notification, error)
@@ -138,6 +139,9 @@ type Querier interface {
 	ListSettlements(ctx context.Context, tripID uuid.UUID) ([]Settlement, error)
 	ListSharedTrips(ctx context.Context, userID *uuid.UUID) ([]ListSharedTripsRow, error)
 	ListSharesForExpense(ctx context.Context, expenseID uuid.UUID) ([]ExpenseShare, error)
+	// Like ListTripShares but keeps expense_id, so the expense list can carry each
+	// row's shares without a per-expense query.
+	ListSharesForTrip(ctx context.Context, tripID uuid.UUID) ([]ListSharesForTripRow, error)
 	ListTransport(ctx context.Context, tripID uuid.UUID) ([]Transportation, error)
 	ListTripPhotos(ctx context.Context, tripID uuid.UUID) ([]Photo, error)
 	ListTripShares(ctx context.Context, tripID uuid.UUID) ([]ListTripSharesRow, error)
@@ -173,6 +177,9 @@ type Querier interface {
 	UpdateTransport(ctx context.Context, arg UpdateTransportParams) error
 	UpdateTrip(ctx context.Context, arg UpdateTripParams) error
 	UpdateTripStartCoords(ctx context.Context, arg UpdateTripStartCoordsParams) error
+	// PUT /me is a partial update: photo_url/bio change only when the field was sent
+	// (@set_photo / @set_bio). An explicit "" arrives as NULL here and clears it; an
+	// omitted field leaves the stored value untouched.
 	UpdateUserProfile(ctx context.Context, arg UpdateUserProfileParams) error
 	// Reuses an existing payer record (same trip + name) to avoid duplicates (req 3.6).
 	UpsertExternalPayer(ctx context.Context, arg UpsertExternalPayerParams) (ExternalPayer, error)

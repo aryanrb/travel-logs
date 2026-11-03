@@ -1,12 +1,13 @@
 -- name: InsertExpense :one
+-- last_modified_by starts as the creator (recorded_by), mirroring timeline entries.
 INSERT INTO expenses (
     trip_id, title, amount, currency, category, expense_date,
     paid_by_user_id, paid_by_external_id, recorded_by, split_method, notes, receipt_url, hide_from_public, entry_id,
-    original_currency, original_amount, exchange_rate, from_pool
+    original_currency, original_amount, exchange_rate, from_pool, last_modified_by
 ) VALUES (
     @trip_id, @title, @amount, @currency, @category, @expense_date,
     @paid_by_user_id, @paid_by_external_id, @recorded_by, @split_method, @notes, @receipt_url, @hide_from_public, @entry_id,
-    @original_currency, @original_amount, @exchange_rate, @from_pool
+    @original_currency, @original_amount, @exchange_rate, @from_pool, @recorded_by
 )
 RETURNING *;
 
@@ -34,6 +35,7 @@ UPDATE expenses SET
     original_amount = @original_amount,
     exchange_rate = @exchange_rate,
     from_pool = @from_pool,
+    last_modified_by = @last_modified_by,
     updated_at = now()
 WHERE id = @id;
 
@@ -62,6 +64,14 @@ SELECT * FROM expense_shares WHERE expense_id = @expense_id;
 
 -- name: ListTripShares :many
 SELECT s.user_id, s.external_id, s.amount
+FROM expense_shares s
+JOIN expenses e ON e.id = s.expense_id
+WHERE e.trip_id = @trip_id;
+
+-- name: ListSharesForTrip :many
+-- Like ListTripShares but keeps expense_id, so the expense list can carry each
+-- row's shares without a per-expense query.
+SELECT s.expense_id, s.user_id, s.external_id, s.amount
 FROM expense_shares s
 JOIN expenses e ON e.id = s.expense_id
 WHERE e.trip_id = @trip_id;

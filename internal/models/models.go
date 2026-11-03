@@ -49,6 +49,7 @@ type Expense struct {
 	OriginalAmount   *int64     `db:"original_amount" json:"original_amount"`
 	ExchangeRate     *float64   `db:"exchange_rate" json:"exchange_rate"`
 	FromPool         bool       `db:"from_pool" json:"from_pool"`
+	LastModifiedBy   *uuid.UUID `db:"last_modified_by" json:"last_modified_by"`
 }
 
 type ExpenseShare struct {

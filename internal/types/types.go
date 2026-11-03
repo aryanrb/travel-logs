@@ -265,12 +265,26 @@ type Party struct {
 type ShareOut struct {
 	Party  Party `json:"party"`
 	Amount int64 `json:"amount"`
+	// Percent is a share's slice of the expense total, to 2 dp. Set only for custom
+	// splits (derived from the amount); omitted for equal splits, where every slice
+	// is just 100/n and carries no extra information.
+	Percent *float64 `json:"percent,omitempty"`
 }
 
 type ExpenseResponse struct {
 	Expense models.Expense `json:"expense"`
 	PaidBy  Party          `json:"paid_by"`
 	Shares  []ShareOut     `json:"shares"`
+}
+
+// ExpenseListItem is one row of GET /trips/:id/expenses: the existing flat expense
+// fields (promoted from the embedded Expense, incl. last_modified_by) plus the
+// payer and shares, so the client needn't fetch each expense for the person filter
+// and CSV export. Same embed pattern as TripResponse.
+type ExpenseListItem struct {
+	models.Expense
+	PaidBy Party      `json:"paid_by"`
+	Shares []ShareOut `json:"shares"`
 }
 
 // ─── Settlements & balances ─────────────────────────────────────────────────

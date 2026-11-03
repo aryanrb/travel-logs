@@ -113,20 +113,31 @@ func (q *Queries) InsertUser(ctx context.Context, arg InsertUserParams) (User, e
 }
 
 const updateUserProfile = `-- name: UpdateUserProfile :exec
-UPDATE users SET name = $1, photo_url = $2, bio = $3 WHERE id = $4
+UPDATE users SET
+    name = $1,
+    photo_url = CASE WHEN $2::boolean THEN $3 ELSE photo_url END,
+    bio = CASE WHEN $4::boolean THEN $5 ELSE bio END
+WHERE id = $6
 `
 
 type UpdateUserProfileParams struct {
 	Name     string    `db:"name" json:"name"`
+	SetPhoto bool      `db:"set_photo" json:"set_photo"`
 	PhotoUrl *string   `db:"photo_url" json:"photo_url"`
+	SetBio   bool      `db:"set_bio" json:"set_bio"`
 	Bio      *string   `db:"bio" json:"bio"`
 	ID       uuid.UUID `db:"id" json:"id"`
 }
 
+// PUT /me is a partial update: photo_url/bio change only when the field was sent
+// (@set_photo / @set_bio). An explicit "" arrives as NULL here and clears it; an
+// omitted field leaves the stored value untouched.
 func (q *Queries) UpdateUserProfile(ctx context.Context, arg UpdateUserProfileParams) error {
 	_, err := q.db.Exec(ctx, updateUserProfile,
 		arg.Name,
+		arg.SetPhoto,
 		arg.PhotoUrl,
+		arg.SetBio,
 		arg.Bio,
 		arg.ID,
 	)

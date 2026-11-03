@@ -132,7 +132,12 @@ func (s *UserService) UpdateProfile(ctx context.Context, userID uuid.UUID, in ty
 	if err != nil {
 		return err
 	}
+	// A field changes only when it was sent: nil (omitted) leaves it untouched;
+	// "" normalises to nil here and clears it; a value sets it.
 	return apperror.FromDBOrNil(s.q.UpdateUserProfile(ctx, models.UpdateUserProfileParams{
-		Name: in.Name, PhotoUrl: photo, Bio: bio, ID: userID,
+		Name:     in.Name,
+		SetPhoto: in.PhotoURL != nil, PhotoUrl: photo,
+		SetBio: in.Bio != nil, Bio: bio,
+		ID: userID,
 	}))
 }
